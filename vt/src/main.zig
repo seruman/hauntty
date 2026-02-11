@@ -167,9 +167,20 @@ export fn gx_dump_screen(format: u32) callconv(.c) i32 {
             };
         },
         1 => {
-            // Full VT with all extras — for reattach state restoration.
+            // VT for reattach state restoration.
+            // palette=false: OSC 4 palette sequences override host terminal colors.
+            // tabstops=false: tabstop restoration moves cursor after CUP, corrupting position.
             var fmt: TerminalFormatter = .init(t, .vt);
-            fmt.extra = .all;
+            fmt.content = .{ .selection = null };
+            fmt.extra = .{
+                .palette = false,
+                .modes = true,
+                .scrolling_region = true,
+                .tabstops = false,
+                .pwd = true,
+                .keyboard = true,
+                .screen = .all,
+            };
             fmt.format(&g_dump.?.writer) catch {
                 dumpFree();
                 return -1;

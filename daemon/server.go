@@ -218,12 +218,13 @@ func (s *Server) handleAttach(conn *protocol.Conn, msg *protocol.Attach) (*Sessi
 		}
 		s.sessions[name] = sess
 
-		// Remove session from map when it exits.
+		// Remove session from map and clean up state file when it exits.
 		go func() {
 			<-sess.done
 			s.mu.Lock()
 			delete(s.sessions, name)
 			s.mu.Unlock()
+			CleanState(name)
 		}()
 	}
 	s.mu.Unlock()
@@ -268,18 +269,6 @@ func (s *Server) handleList(conn *protocol.Conn) {
 		})
 	}
 	s.mu.RUnlock()
-
-	// Include dead sessions from persisted state files.
-	dead, err := ListDeadSessions(running)
-	if err != nil {
-		slog.Debug("list dead sessions error", "err", err)
-	}
-	for _, name := range dead {
-		sessions = append(sessions, protocol.Session{
-			Name:  name,
-			State: "dead",
-		})
-	}
 
 	conn.WriteMessage(&protocol.Sessions{Sessions: sessions})
 }

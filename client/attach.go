@@ -71,6 +71,10 @@ func (c *Client) RunAttach(name string, command string) error {
 		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", ok.SessionName, ok.PID)
 	}
 
+	// Clear screen before rendering session content so it doesn't mix
+	// with whatever was previously on the host terminal.
+	os.Stdout.Write([]byte("\x1b[2J\x1b[H"))
+
 	// Check for initial STATE message (screen restore on reattach).
 	// We peek at the first message; if it's STATE, write the screen dump.
 	// Otherwise, we handle it in the main loop.
@@ -182,6 +186,13 @@ func (c *Client) RunAttach(name string, command string) error {
 			close(done)
 			if err == io.EOF {
 				term.Restore(fd, oldState)
+				// Reset terminal modes that may have been set by the inner
+				// session (mouse, bracketed paste, focus events, alt screen,
+				// cursor visibility) so they don't leak into the host terminal.
+				os.Stdout.Write([]byte(
+					"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l" +
+						"\x1b[?2004l\x1b[?1004l\x1b[?1049l" +
+						"\x1b[?25h\x1b[0m"))
 				fmt.Fprintf(os.Stderr, "\n[hauntty] detached\n")
 				return nil
 			}
