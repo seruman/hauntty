@@ -161,7 +161,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 
 		switch m := msg.(type) {
 		case *protocol.Attach:
-			attached, err = s.handleAttach(conn, m)
+			attached, err = s.handleAttach(conn, netConn.Close, m)
 			if err != nil {
 				slog.Debug("attach error", "err", err)
 				return
@@ -175,8 +175,14 @@ func (s *Server) handleConn(netConn net.Conn) {
 				attached.resize(m.Cols, m.Rows)
 			}
 		case *protocol.Detach:
-			if attached != nil {
-				attached.detach()
+			target := attached
+			if m.Name != "" {
+				s.mu.RLock()
+				target, _ = s.sessions[m.Name]
+				s.mu.RUnlock()
+			}
+			if target != nil {
+				target.disconnectClient()
 				attached = nil
 			}
 		case *protocol.List:
@@ -196,7 +202,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 	}
 }
 
-func (s *Server) handleAttach(conn *protocol.Conn, msg *protocol.Attach) (*Session, error) {
+func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach) (*Session, error) {
 	name := msg.Name
 	if name == "" {
 		existing := make(map[string]bool, len(s.sessions))
@@ -241,7 +247,7 @@ func (s *Server) handleAttach(conn *protocol.Conn, msg *protocol.Attach) (*Sessi
 		return nil, err
 	}
 
-	if err := sess.attach(conn, msg.Cols, msg.Rows); err != nil {
+	if err := sess.attach(conn, closeConn, msg.Cols, msg.Rows); err != nil {
 		conn.WriteMessage(&protocol.Error{Code: 2, Message: err.Error()})
 		return nil, err
 	}

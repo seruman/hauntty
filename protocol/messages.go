@@ -143,11 +143,21 @@ func (m *Resize) decode(d *Decoder) error {
 	return err
 }
 
-type Detach struct{}
+type Detach struct {
+	Name string // Empty = detach self, non-empty = detach named session.
+}
 
-func (m *Detach) Type() uint8            { return TypeDetach }
-func (m *Detach) encode(_ *Encoder) error { return nil }
-func (m *Detach) decode(_ *Decoder) error { return nil }
+func (m *Detach) Type() uint8 { return TypeDetach }
+
+func (m *Detach) encode(e *Encoder) error {
+	return e.WriteString(m.Name)
+}
+
+func (m *Detach) decode(d *Decoder) error {
+	var err error
+	m.Name, err = d.ReadString()
+	return err
+}
 
 type List struct{}
 

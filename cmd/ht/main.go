@@ -261,8 +261,18 @@ func cmdDetach() {
 		fmt.Fprintln(os.Stderr, "ht: not inside a hauntty session")
 		os.Exit(1)
 	}
-	// Send Ctrl-] to trigger detach in the attach loop.
-	os.Stdout.Write([]byte{0x1d})
+
+	c, err := client.Connect()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
+		os.Exit(1)
+	}
+	defer c.Close()
+
+	if err := c.DetachSession(sessionName); err != nil {
+		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func cmdDaemon(args []string) {

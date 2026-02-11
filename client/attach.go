@@ -2,8 +2,10 @@ package client
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -12,6 +14,15 @@ import (
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
+
+// isConnClosed returns true if err indicates a closed network connection.
+func isConnClosed(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return opErr.Err.Error() == "use of closed network connection"
+	}
+	return false
+}
 
 // envVarsToForward lists environment variables forwarded from the client
 // to the daemon on session creation.
@@ -140,7 +151,6 @@ func (c *Client) RunAttach(name string, command string) error {
 					}
 					mu.Lock()
 					c.Detach()
-					c.Close() // Unblock the main read loop.
 					mu.Unlock()
 					return
 				}
@@ -184,7 +194,7 @@ func (c *Client) RunAttach(name string, command string) error {
 		msg, err := c.ReadMessage()
 		if err != nil {
 			close(done)
-			if err == io.EOF {
+			if err == io.EOF || isConnClosed(err) {
 				term.Restore(fd, oldState)
 				// Reset terminal modes that may have been set by the inner
 				// session (mouse, bracketed paste, focus events, alt screen,

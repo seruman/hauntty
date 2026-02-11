@@ -24,13 +24,14 @@ type Session struct {
 	PID       uint32
 	CreatedAt time.Time
 
-	mu       sync.Mutex
-	ptmx     *os.File
-	cmd      *exec.Cmd
-	term     *wasm.Terminal
-	client   *protocol.Conn
-	clientMu sync.Mutex
-	done     chan struct{}
+	mu          sync.Mutex
+	ptmx        *os.File
+	cmd         *exec.Cmd
+	term        *wasm.Terminal
+	client      *protocol.Conn
+	clientClose func() error // closes the underlying net.Conn of the attached client
+	clientMu    sync.Mutex
+	done        chan struct{}
 	exitCode int32
 	tempDir  string
 }
@@ -142,9 +143,9 @@ func (s *Session) readLoop(ctx context.Context) {
 	s.clientMu.Unlock()
 }
 
-func (s *Session) attach(conn *protocol.Conn, cols, rows uint16) error {
-	// Detach any existing client.
-	s.detach()
+func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows uint16) error {
+	// Disconnect any existing client (closes their connection).
+	s.disconnectClient()
 
 	// Send state dump to the new client (full VT for state restoration).
 	dump, err := s.term.DumpScreen(context.Background(), wasm.DumpVTFull)
@@ -164,6 +165,7 @@ func (s *Session) attach(conn *protocol.Conn, cols, rows uint16) error {
 	// Set the new client.
 	s.clientMu.Lock()
 	s.client = conn
+	s.clientClose = closeConn
 	s.clientMu.Unlock()
 
 	// Resize if client dimensions differ.
@@ -174,10 +176,26 @@ func (s *Session) attach(conn *protocol.Conn, cols, rows uint16) error {
 	return nil
 }
 
+// detach clears the attached client without closing the connection.
+// Used when the same connection sends a DETACH message.
 func (s *Session) detach() {
 	s.clientMu.Lock()
 	s.client = nil
+	s.clientClose = nil
 	s.clientMu.Unlock()
+}
+
+// disconnectClient clears the attached client AND closes the underlying
+// connection so the remote attach process unblocks. Used by "ht detach".
+func (s *Session) disconnectClient() {
+	s.clientMu.Lock()
+	closeFn := s.clientClose
+	s.client = nil
+	s.clientClose = nil
+	s.clientMu.Unlock()
+	if closeFn != nil {
+		closeFn()
+	}
 }
 
 func (s *Session) kill() {

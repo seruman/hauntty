@@ -154,7 +154,13 @@ func (c *Client) Dump(name string, format uint8) ([]byte, error) {
 	}
 }
 
-// Detach sends a DETACH message to the daemon.
+// Detach sends a DETACH message to the daemon (detaches current connection).
 func (c *Client) Detach() error {
 	return c.conn.WriteMessage(&protocol.Detach{})
+}
+
+// DetachSession sends a DETACH message for a named session, disconnecting
+// its currently attached client.
+func (c *Client) DetachSession(name string) error {
+	return c.conn.WriteMessage(&protocol.Detach{Name: name})
 }
