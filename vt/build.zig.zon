@@ -1,0 +1,14 @@
+.{
+    .name = .hauntty_vt,
+    .version = "0.1.0",
+    .fingerprint = 0x96a0f54f46e2550a,
+    .minimum_zig_version = "0.15.1",
+    .dependencies = .{
+        .ghostty = .{ .path = "../x/ghostty" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
