@@ -42,7 +42,7 @@ func TestBasicFeedAndDump(t *testing.T) {
 		t.Fatalf("Feed: %v", err)
 	}
 
-	dump, err := term.DumpScreen(ctx)
+	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestResize(t *testing.T) {
 		t.Fatalf("Feed after resize: %v", err)
 	}
 
-	dump, err := term.DumpScreen(ctx)
+	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen after resize: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestCursorPosition(t *testing.T) {
 	defer term.Close(ctx)
 
 	// Fresh terminal: cursor at (0, 0).
-	dump, err := term.DumpScreen(ctx)
+	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestCursorPosition(t *testing.T) {
 	if err := term.Feed(ctx, []byte("ABCDE")); err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
-	dump, err = term.DumpScreen(ctx)
+	dump, err = term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestReset(t *testing.T) {
 		t.Fatalf("Reset: %v", err)
 	}
 
-	dump, err := term.DumpScreen(ctx)
+	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestAltScreen(t *testing.T) {
 	defer term.Close(ctx)
 
 	// Initially not on alt screen.
-	dump, err := term.DumpScreen(ctx)
+	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestAltScreen(t *testing.T) {
 	if err := term.Feed(ctx, []byte("\x1b[?1049h")); err != nil {
 		t.Fatalf("Feed alt screen enter: %v", err)
 	}
-	dump, err = term.DumpScreen(ctx)
+	dump, err = term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestAltScreen(t *testing.T) {
 	if err := term.Feed(ctx, []byte("\x1b[?1049l")); err != nil {
 		t.Fatalf("Feed alt screen leave: %v", err)
 	}
-	dump, err = term.DumpScreen(ctx)
+	dump, err = term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}
@@ -210,11 +210,11 @@ func TestMultipleTerminals(t *testing.T) {
 		t.Fatalf("Feed term2: %v", err)
 	}
 
-	dump1, err := term1.DumpScreen(ctx)
+	dump1, err := term1.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen term1: %v", err)
 	}
-	dump2, err := term2.DumpScreen(ctx)
+	dump2, err := term2.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen term2: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestReInit(t *testing.T) {
 	term2 := newTerminal(t, ctx, rt, 80, 24, 1000)
 	defer term2.Close(ctx)
 
-	dump, err := term2.DumpScreen(ctx)
+	dump, err := term2.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		t.Fatalf("DumpScreen: %v", err)
 	}

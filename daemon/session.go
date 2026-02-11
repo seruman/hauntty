@@ -146,8 +146,8 @@ func (s *Session) attach(conn *protocol.Conn, cols, rows uint16) error {
 	// Detach any existing client.
 	s.detach()
 
-	// Send state dump to the new client.
-	dump, err := s.term.DumpScreen(context.Background())
+	// Send state dump to the new client (full VT for state restoration).
+	dump, err := s.term.DumpScreen(context.Background(), wasm.DumpVTFull)
 	if err != nil {
 		return err
 	}
@@ -204,8 +204,8 @@ func (s *Session) resize(cols, rows uint16) error {
 	return nil
 }
 
-func (s *Session) dumpScreen(ctx context.Context) (*wasm.ScreenDump, error) {
-	return s.term.DumpScreen(ctx)
+func (s *Session) dumpScreen(ctx context.Context, format uint32) (*wasm.ScreenDump, error) {
+	return s.term.DumpScreen(ctx, format)
 }
 
 func (s *Session) isRunning() bool {

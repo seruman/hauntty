@@ -211,14 +211,21 @@ type ScreenDump struct {
 	IsAltScreen bool
 }
 
-// DumpScreen serializes the terminal screen to VT escape sequences and
+// Dump format constants matching gx_dump_screen parameter.
+const (
+	DumpPlain  uint32 = 0 // Plain text, no escape sequences.
+	DumpVTFull uint32 = 1 // Full VT with all extras (for reattach).
+	DumpVTSafe uint32 = 2 // Safe VT — colors but no palette/mode corruption.
+)
+
+// DumpScreen serializes the terminal screen in the given format and
 // returns the result along with cursor position and alt screen state.
-func (t *Terminal) DumpScreen(ctx context.Context) (*ScreenDump, error) {
+func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// Dump screen into internal WASM buffer.
-	results, err := t.gxDumpScreen.Call(ctx)
+	results, err := t.gxDumpScreen.Call(ctx, uint64(format))
 	if err != nil {
 		return nil, fmt.Errorf("wasm: gx_dump_screen: %w", err)
 	}

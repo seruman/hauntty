@@ -136,7 +136,7 @@ export fn gx_reset() callconv(.c) i32 {
 }
 
 // ---------------------------------------------------------------------------
-// State extraction — dump screen as VT escape sequences
+// State extraction — dump screen in plain or VT format
 // ---------------------------------------------------------------------------
 
 fn dumpFree() void {
@@ -146,19 +146,59 @@ fn dumpFree() void {
     }
 }
 
-export fn gx_dump_screen() callconv(.c) i32 {
+/// Dump the screen. format: 0=plain, 1=vt (for reattach), 2=vt-safe (for display).
+export fn gx_dump_screen(format: u32) callconv(.c) i32 {
     const t = &(g_terminal orelse return -1);
 
     dumpFree();
 
     g_dump = .init(allocator);
 
-    var fmt: TerminalFormatter = .init(t, .vt);
-    fmt.extra = .all;
-    fmt.format(&g_dump.?.writer) catch {
-        dumpFree();
-        return -1;
-    };
+    switch (format) {
+        0 => {
+            // Plain text — no escape sequences.
+            const fmt: TerminalFormatter = .init(t, .{
+                .emit = .plain,
+                .palette = &t.colors.palette.current,
+            });
+            g_dump.?.writer.print("{f}", .{fmt}) catch {
+                dumpFree();
+                return -1;
+            };
+        },
+        1 => {
+            // Full VT with all extras — for reattach state restoration.
+            var fmt: TerminalFormatter = .init(t, .vt);
+            fmt.extra = .all;
+            fmt.format(&g_dump.?.writer) catch {
+                dumpFree();
+                return -1;
+            };
+        },
+        2 => {
+            // Safe VT — colors preserved but no palette/mode changes that
+            // would corrupt the host terminal. Ends with SGR reset.
+            const fmt: TerminalFormatter = .{
+                .terminal = t,
+                .opts = .{
+                    .emit = .vt,
+                    .palette = &t.colors.palette.current,
+                },
+                .content = .{ .selection = null },
+                .extra = .none,
+                .pin_map = null,
+            };
+            g_dump.?.writer.print("{f}", .{fmt}) catch {
+                dumpFree();
+                return -1;
+            };
+            g_dump.?.writer.writeAll("\x1b[0m") catch {
+                dumpFree();
+                return -1;
+            };
+        },
+        else => return -1,
+    }
 
     const data = g_dump.?.written();
     return @intCast(data.len);

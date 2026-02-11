@@ -325,7 +325,16 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 		return
 	}
 
-	dump, err := sess.dumpScreen(s.ctx)
+	// Map protocol format (0=plain, 1=vt, 2=html) to WASM dump format.
+	var wasmFmt uint32
+	switch msg.Format {
+	case 1:
+		wasmFmt = wasm.DumpVTSafe // VT with SGR reset, no palette/mode corruption.
+	default:
+		wasmFmt = wasm.DumpPlain
+	}
+
+	dump, err := sess.dumpScreen(s.ctx, wasmFmt)
 	if err != nil {
 		conn.WriteMessage(&protocol.Error{Code: 5, Message: err.Error()})
 		return

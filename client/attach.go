@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -31,6 +32,19 @@ func collectEnv() []string {
 		}
 	}
 	return env
+}
+
+// detachSeq is the CSI u encoding of Ctrl-] (\x1b[93;5u).
+var detachSeq = []byte("\x1b[93;5u")
+
+// detachIndex returns the index of the first detach trigger in data,
+// checking for both the raw byte 0x1d and the kitty keyboard CSI u
+// sequence \x1b[93;5u. Returns -1 if not found.
+func detachIndex(data []byte) int {
+	if i := bytes.IndexByte(data, 0x1d); i >= 0 {
+		return i
+	}
+	return bytes.Index(data, detachSeq)
 }
 
 // RunAttach performs the interactive attach loop: connects to (or creates)
@@ -112,20 +126,19 @@ func (c *Client) RunAttach(name string, command string) error {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
 				data := buf[:n]
-				// Scan for detach keybind (Ctrl-\, byte 0x1c).
-				for i, b := range data {
-					if b == 0x1c {
-						// Send any bytes before the detach key.
-						if i > 0 {
-							mu.Lock()
-							c.WriteMessage(&protocol.Input{Data: data[:i]})
-							mu.Unlock()
-						}
+				// Scan for detach keybind: Ctrl-] as raw byte (0x1d)
+				// or kitty keyboard protocol CSI u sequence (\x1b[93;5u).
+				if i := detachIndex(data); i >= 0 {
+					if i > 0 {
 						mu.Lock()
-						c.Detach()
+						c.WriteMessage(&protocol.Input{Data: data[:i]})
 						mu.Unlock()
-						return
 					}
+					mu.Lock()
+					c.Detach()
+					c.Close() // Unblock the main read loop.
+					mu.Unlock()
+					return
 				}
 				mu.Lock()
 				c.WriteMessage(&protocol.Input{Data: data})

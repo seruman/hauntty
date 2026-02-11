@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/selman/hauntty/wasm"
 )
 
 // Persister periodically saves terminal state for all sessions.
@@ -66,7 +68,7 @@ func (p *Persister) saveAll() {
 
 // SaveSession dumps a single session's screen state to disk.
 func (p *Persister) SaveSession(name string, s *Session) error {
-	dump, err := s.dumpScreen(p.ctx)
+	dump, err := s.dumpScreen(p.ctx, wasm.DumpVTFull)
 	if err != nil {
 		return fmt.Errorf("persist: dump screen: %w", err)
 	}
