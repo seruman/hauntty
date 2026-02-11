@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/selman/hauntty/client"
+	"github.com/selman/hauntty/config"
 	"github.com/selman/hauntty/daemon"
 )
 
@@ -141,9 +143,13 @@ func cmdList() {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tPID\tCREATED")
 	for _, s := range sessions.Sessions {
-		created := time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
-		fmt.Fprintf(w, "%s\t%s\t%dx%d\t%d\t%s\n",
-			s.Name, s.State, s.Cols, s.Rows, s.PID, created)
+		if s.PID == 0 {
+			fmt.Fprintf(w, "%s\t%s\t-\t-\t-\n", s.Name, s.State)
+		} else {
+			created := time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
+			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%d\t%s\n",
+				s.Name, s.State, s.Cols, s.Rows, s.PID, created)
+		}
 	}
 	w.Flush()
 }
@@ -276,8 +282,20 @@ func cmdDetach() {
 }
 
 func cmdDaemon(args []string) {
-	_ = args
-	wasmPath := "vt/zig-out/bin/hauntty-vt.wasm"
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ht: load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// --auto-exit flag overrides config.
+	for _, arg := range args {
+		if arg == "--auto-exit" {
+			cfg.Daemon.AutoExit = true
+		}
+	}
+
+	wasmPath := resolveWASMPath()
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ht: read wasm: %v\n", err)
@@ -285,7 +303,7 @@ func cmdDaemon(args []string) {
 	}
 
 	ctx := context.Background()
-	srv, err := daemon.New(ctx, wasmBytes)
+	srv, err := daemon.New(ctx, wasmBytes, &cfg.Daemon)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ht: init daemon: %v\n", err)
 		os.Exit(1)
@@ -295,4 +313,18 @@ func cmdDaemon(args []string) {
 		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// resolveWASMPath finds the WASM module: env var → next to executable → hardcoded fallback.
+func resolveWASMPath() string {
+	if p := os.Getenv("HAUNTTY_WASM_PATH"); p != "" {
+		return p
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "hauntty-vt.wasm")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return "vt/zig-out/bin/hauntty-vt.wasm"
 }

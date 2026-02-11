@@ -14,8 +14,6 @@ import (
 	"github.com/selman/hauntty/wasm"
 )
 
-const defaultScrollback = 10000
-
 // Session represents a single terminal session managed by the daemon.
 type Session struct {
 	Name      string
@@ -31,16 +29,13 @@ type Session struct {
 	client      *protocol.Conn
 	clientClose func() error // closes the underlying net.Conn of the attached client
 	clientMu    sync.Mutex
+	feedCh      chan []byte
 	done        chan struct{}
 	exitCode int32
 	tempDir  string
 }
 
 func newSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
-	if scrollback == 0 {
-		scrollback = defaultScrollback
-	}
-
 	if command == "" {
 		// Prefer SHELL from the client's forwarded env over the daemon's own env.
 		for _, e := range env {
@@ -97,38 +92,61 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 		ptmx:      ptmx,
 		cmd:       cmd,
 		term:      term,
+		feedCh:    make(chan []byte, 64),
 		done:      make(chan struct{}),
 		tempDir:   tempDir,
 	}
 
+	go s.feedLoop(ctx)
 	go s.readLoop(ctx)
 	return s, nil
 }
 
+// feedLoop consumes PTY output from feedCh and feeds it to the WASM terminal.
+// Runs in its own goroutine so WASM processing never blocks the client path.
+func (s *Session) feedLoop(ctx context.Context) {
+	for data := range s.feedCh {
+		if err := s.term.Feed(ctx, data); err != nil {
+			slog.Debug("wasm feed error", "session", s.Name, "err", err)
+		}
+	}
+}
+
+// readLoop reads PTY output, forwards it to the attached client and queues it
+// for WASM state machine processing. The client write uses buf[:n] directly
+// (WriteMessage copies internally), avoiding an allocation on the hot path.
+// Backpressure: WriteMessage calls net.Conn.Write synchronously. When the
+// kernel socket send buffer is full, Write blocks, which blocks readLoop,
+// which blocks PTY reads, which makes the child process block on write —
+// natural end-to-end flow control with no extra code needed.
 func (s *Session) readLoop(ctx context.Context) {
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := s.ptmx.Read(buf)
 		if n > 0 {
-			data := make([]byte, n)
-			copy(data, buf[:n])
-
+			// Client write: pass buf slice directly (WriteMessage copies internally).
 			s.clientMu.Lock()
 			if s.client != nil {
-				if werr := s.client.WriteMessage(&protocol.Output{Data: data}); werr != nil {
+				if werr := s.client.WriteMessage(&protocol.Output{Data: buf[:n]}); werr != nil {
 					slog.Debug("client write error", "session", s.Name, "err", werr)
 				}
 			}
 			s.clientMu.Unlock()
 
-			if ferr := s.term.Feed(ctx, data); ferr != nil {
-				slog.Debug("wasm feed error", "session", s.Name, "err", ferr)
+			// Async WASM feed: copy needed since feedLoop consumes later.
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			select {
+			case s.feedCh <- data:
+			default:
+				slog.Debug("wasm feed channel full, dropping", "session", s.Name)
 			}
 		}
 		if err != nil {
 			break
 		}
 	}
+	close(s.feedCh)
 
 	s.cmd.Wait()
 	if ws, ok := s.cmd.ProcessState.Sys().(syscall.WaitStatus); ok {

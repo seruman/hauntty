@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/selman/hauntty/config"
 	"github.com/selman/hauntty/namegen"
 	"github.com/selman/hauntty/protocol"
 	"github.com/selman/hauntty/wasm"
@@ -20,19 +21,21 @@ import (
 
 // Server is the hauntty daemon. It listens on a Unix socket and manages sessions.
 type Server struct {
-	socketPath string
-	pidPath    string
-	sessions   map[string]*Session
-	mu         sync.RWMutex
-	wasmRT     *wasm.Runtime
-	ctx        context.Context
-	cancel     context.CancelFunc
-	listener   net.Listener
-	persister  *Persister
+	socketPath        string
+	pidPath           string
+	sessions          map[string]*Session
+	mu                sync.RWMutex
+	wasmRT            *wasm.Runtime
+	ctx               context.Context
+	cancel            context.CancelFunc
+	listener          net.Listener
+	persister         *Persister
+	defaultScrollback uint32
+	autoExit          bool
 }
 
-// New creates a new daemon Server with the given compiled WASM bytes.
-func New(ctx context.Context, wasmBytes []byte) (*Server, error) {
+// New creates a new daemon Server with the given compiled WASM bytes and config.
+func New(ctx context.Context, wasmBytes []byte, cfg *config.DaemonConfig) (*Server, error) {
 	rt, err := wasm.NewRuntime(ctx, wasmBytes)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: init wasm runtime: %w", err)
@@ -40,14 +43,21 @@ func New(ctx context.Context, wasmBytes []byte) (*Server, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
-		socketPath: SocketPath(),
-		pidPath:    PIDPath(),
-		sessions:   make(map[string]*Session),
-		wasmRT:     rt,
-		ctx:        ctx,
-		cancel:     cancel,
+		socketPath:        SocketPath(),
+		pidPath:           PIDPath(),
+		sessions:          make(map[string]*Session),
+		wasmRT:            rt,
+		ctx:               ctx,
+		cancel:            cancel,
+		defaultScrollback: cfg.DefaultScrollback,
+		autoExit:          cfg.AutoExit,
 	}
-	s.persister = NewPersister(s.liveSessions, 30*time.Second)
+
+	if cfg.StatePersistence {
+		interval := time.Duration(cfg.StatePersistenceInterval) * time.Second
+		s.persister = NewPersister(s.liveSessions, interval)
+	}
+
 	return s, nil
 }
 
@@ -85,7 +95,9 @@ func (s *Server) Listen() error {
 		}
 	}()
 
-	s.persister.Start()
+	if s.persister != nil {
+		s.persister.Start()
+	}
 
 	slog.Info("daemon listening", "socket", s.socketPath)
 
@@ -215,8 +227,12 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 	s.mu.Lock()
 	sess, exists := s.sessions[name]
 	if !exists {
+		scrollback := msg.ScrollbackLines
+		if scrollback == 0 {
+			scrollback = s.defaultScrollback
+		}
 		var err error
-		sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.ScrollbackLines, s.wasmRT)
+		sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT)
 		if err != nil {
 			s.mu.Unlock()
 			conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()})
@@ -229,8 +245,13 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 			<-sess.done
 			s.mu.Lock()
 			delete(s.sessions, name)
+			empty := len(s.sessions) == 0
 			s.mu.Unlock()
 			CleanState(name)
+			if s.autoExit && empty {
+				slog.Info("auto-exit: last session ended, shutting down")
+				s.Shutdown()
+			}
 		}()
 	}
 	s.mu.Unlock()
@@ -275,6 +296,11 @@ func (s *Server) handleList(conn *protocol.Conn) {
 		})
 	}
 	s.mu.RUnlock()
+
+	dead, _ := ListDeadSessions(running)
+	for _, name := range dead {
+		sessions = append(sessions, protocol.Session{Name: name, State: "dead"})
+	}
 
 	conn.WriteMessage(&protocol.Sessions{Sessions: sessions})
 }
@@ -340,10 +366,11 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 
 // Shutdown gracefully stops the daemon, killing all sessions and cleaning up.
 func (s *Server) Shutdown() {
-	s.persister.Stop()
-
-	// Final save of all sessions before shutdown.
-	s.persister.saveAll()
+	if s.persister != nil {
+		s.persister.Stop()
+		// Final save of all sessions before shutdown.
+		s.persister.saveAll()
+	}
 
 	s.cancel()
 
