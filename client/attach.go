@@ -15,6 +15,7 @@ import (
 // envVarsToForward lists environment variables forwarded from the client
 // to the daemon on session creation.
 var envVarsToForward = []string{
+	"SHELL",
 	"GHOSTTY_RESOURCES_DIR",
 	"TERM",
 	"COLORTERM",

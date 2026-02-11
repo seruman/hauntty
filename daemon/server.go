@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/selman/hauntty/namegen"
 	"github.com/selman/hauntty/protocol"
 	"github.com/selman/hauntty/wasm"
 	"golang.org/x/sys/unix"
@@ -198,7 +199,11 @@ func (s *Server) handleConn(netConn net.Conn) {
 func (s *Server) handleAttach(conn *protocol.Conn, msg *protocol.Attach) (*Session, error) {
 	name := msg.Name
 	if name == "" {
-		name = fmt.Sprintf("session-%d", time.Now().UnixNano())
+		existing := make(map[string]bool, len(s.sessions))
+		for k := range s.sessions {
+			existing[k] = true
+		}
+		name = namegen.GenerateUnique(existing)
 	}
 
 	s.mu.Lock()

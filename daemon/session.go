@@ -41,7 +41,16 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 	}
 
 	if command == "" {
-		command = os.Getenv("SHELL")
+		// Prefer SHELL from the client's forwarded env over the daemon's own env.
+		for _, e := range env {
+			if len(e) > 6 && e[:6] == "SHELL=" {
+				command = e[6:]
+				break
+			}
+		}
+		if command == "" {
+			command = os.Getenv("SHELL")
+		}
 		if command == "" {
 			command = "/bin/sh"
 		}
@@ -57,7 +66,6 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 
 	cmd := exec.Command(shellCmd)
 	cmd.Env = shellEnv
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	ws := &pty.Winsize{Rows: rows, Cols: cols}
 	ptmx, err := pty.StartWithSize(cmd, ws)

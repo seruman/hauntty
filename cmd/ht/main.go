@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/selman/hauntty/client"
+	"github.com/selman/hauntty/daemon"
 )
 
 func main() {
@@ -265,6 +267,22 @@ func cmdDetach() {
 
 func cmdDaemon(args []string) {
 	_ = args
-	fmt.Fprintln(os.Stderr, "ht: daemon mode not yet implemented -- see daemon package")
-	os.Exit(1)
+	wasmPath := "vt/zig-out/bin/hauntty-vt.wasm"
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ht: read wasm: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	srv, err := daemon.New(ctx, wasmBytes)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ht: init daemon: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := srv.Listen(); err != nil {
+		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
+		os.Exit(1)
+	}
 }
