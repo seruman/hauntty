@@ -199,11 +199,13 @@ func (c *Client) RunAttach(name string, command string) error {
 				// Reset terminal modes that may have been set by the inner
 				// session (mouse, bracketed paste, focus events, alt screen,
 				// cursor visibility) so they don't leak into the host terminal.
+				// Clear screen so session content doesn't remain visible.
 				os.Stdout.Write([]byte(
 					"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l" +
 						"\x1b[?2004l\x1b[?1004l\x1b[?1049l" +
-						"\x1b[?25h\x1b[0m"))
-				fmt.Fprintf(os.Stderr, "\n[hauntty] detached\n")
+						"\x1b[?25h\x1b[0m" +
+						"\x1b[2J\x1b[H"))
+				fmt.Fprintf(os.Stderr, "[hauntty] detached\n")
 				return nil
 			}
 			term.Restore(fd, oldState)
