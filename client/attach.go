@@ -82,6 +82,13 @@ func (c *Client) RunAttach(name string, command string) error {
 		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", ok.SessionName, ok.PID)
 	}
 
+	// Save host terminal DEC private mode state (XTSAVE) and push kitty
+	// keyboard level so we can restore exactly on detach, rather than
+	// blindly resetting modes the host shell may have had enabled.
+	os.Stdout.Write([]byte(
+		"\x1b[?1000;1002;1003;1006;2004;1004;1049;2048;2026;25s" +
+			"\x1b[>0u"))
+
 	// Clear screen before rendering session content so it doesn't mix
 	// with whatever was previously on the host terminal.
 	os.Stdout.Write([]byte("\x1b[2J\x1b[H"))
@@ -196,15 +203,12 @@ func (c *Client) RunAttach(name string, command string) error {
 			close(done)
 			if err == io.EOF || isConnClosed(err) {
 				term.Restore(fd, oldState)
-				// Reset terminal modes that may have been set by the inner
-				// session (mouse, bracketed paste, focus events, alt screen,
-				// cursor visibility) so they don't leak into the host terminal.
-				// Clear screen so session content doesn't remain visible.
+				// Restore host terminal DEC private modes (XTRESTORE) and
+				// pop kitty keyboard level to pre-attach state.
 				os.Stdout.Write([]byte(
-					"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l" +
-						"\x1b[?2004l\x1b[?1004l\x1b[?1049l" +
-						"\x1b[?25h\x1b[0m" +
-						"\x1b[2J\x1b[H"))
+					"\x1b[?1000;1002;1003;1006;2004;1004;1049;2048;2026;25r" +
+						"\x1b[<u" +
+						"\x1b[0m\x1b[2J\x1b[H"))
 				fmt.Fprintf(os.Stderr, "[hauntty] detached\n")
 				return nil
 			}
