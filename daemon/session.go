@@ -32,6 +32,7 @@ type Session struct {
 	clientMu sync.Mutex
 	done     chan struct{}
 	exitCode int32
+	tempDir  string
 }
 
 func newSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
@@ -46,13 +47,24 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 		}
 	}
 
-	cmd := exec.Command(command)
-	cmd.Env = env
+	// Apply shell integration (sets HAUNTTY_SESSION, ZDOTDIR, etc.).
+	shellCmd, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
+	if err != nil {
+		slog.Warn("shell integration setup failed, continuing without it", "err", err)
+		shellCmd = command
+		shellEnv = env
+	}
+
+	cmd := exec.Command(shellCmd)
+	cmd.Env = shellEnv
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	ws := &pty.Winsize{Rows: rows, Cols: cols}
 	ptmx, err := pty.StartWithSize(cmd, ws)
 	if err != nil {
+		if tempDir != "" {
+			os.RemoveAll(tempDir)
+		}
 		return nil, err
 	}
 
@@ -61,6 +73,9 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 		ptmx.Close()
 		cmd.Process.Kill()
 		cmd.Wait()
+		if tempDir != "" {
+			os.RemoveAll(tempDir)
+		}
 		return nil, err
 	}
 
@@ -74,6 +89,7 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 		cmd:       cmd,
 		term:      term,
 		done:      make(chan struct{}),
+		tempDir:   tempDir,
 	}
 
 	go s.readLoop(ctx)
@@ -198,4 +214,7 @@ func (s *Session) close(ctx context.Context) {
 	<-s.done
 	s.ptmx.Close()
 	s.term.Close(ctx)
+	if s.tempDir != "" {
+		os.RemoveAll(s.tempDir)
+	}
 }

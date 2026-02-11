@@ -27,6 +27,7 @@ type Server struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	listener   net.Listener
+	persister  *Persister
 }
 
 // New creates a new daemon Server with the given compiled WASM bytes.
@@ -37,14 +38,16 @@ func New(ctx context.Context, wasmBytes []byte) (*Server, error) {
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	return &Server{
+	s := &Server{
 		socketPath: SocketPath(),
 		pidPath:    PIDPath(),
 		sessions:   make(map[string]*Session),
 		wasmRT:     rt,
 		ctx:        ctx,
 		cancel:     cancel,
-	}, nil
+	}
+	s.persister = NewPersister(s.liveSessions, 30*time.Second)
+	return s, nil
 }
 
 // Listen creates the Unix socket, writes the PID file, and accepts connections
@@ -80,6 +83,8 @@ func (s *Server) Listen() error {
 		case <-s.ctx.Done():
 		}
 	}()
+
+	s.persister.Start()
 
 	slog.Info("daemon listening", "socket", s.socketPath)
 
@@ -240,8 +245,10 @@ func (s *Server) handleAttach(conn *protocol.Conn, msg *protocol.Attach) (*Sessi
 
 func (s *Server) handleList(conn *protocol.Conn) {
 	s.mu.RLock()
+	running := make(map[string]bool, len(s.sessions))
 	sessions := make([]protocol.Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
+		running[sess.Name] = true
 		state := "running"
 		if !sess.isRunning() {
 			state = "dead"
@@ -256,6 +263,18 @@ func (s *Server) handleList(conn *protocol.Conn) {
 		})
 	}
 	s.mu.RUnlock()
+
+	// Include dead sessions from persisted state files.
+	dead, err := ListDeadSessions(running)
+	if err != nil {
+		slog.Debug("list dead sessions error", "err", err)
+	}
+	for _, name := range dead {
+		sessions = append(sessions, protocol.Session{
+			Name:  name,
+			State: "dead",
+		})
+	}
 
 	conn.WriteMessage(&protocol.Sessions{Sessions: sessions})
 }
@@ -312,6 +331,11 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 
 // Shutdown gracefully stops the daemon, killing all sessions and cleaning up.
 func (s *Server) Shutdown() {
+	s.persister.Stop()
+
+	// Final save of all sessions before shutdown.
+	s.persister.saveAll()
+
 	s.cancel()
 
 	if s.listener != nil {
@@ -333,4 +357,15 @@ func (s *Server) Shutdown() {
 
 func (s *Server) writePID() error {
 	return os.WriteFile(s.pidPath, []byte(strconv.Itoa(os.Getpid())), 0600)
+}
+
+// liveSessions returns a snapshot of currently tracked sessions.
+func (s *Server) liveSessions() map[string]*Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m := make(map[string]*Session, len(s.sessions))
+	for k, v := range s.sessions {
+		m[k] = v
+	}
+	return m
 }
