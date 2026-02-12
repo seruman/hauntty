@@ -54,7 +54,7 @@
 ## Formatting
 
 - MUST run `gofumpt`, `goimports`, and `go fix ./...` BEFORE `os task complete` (since complete auto-commits).
-- `go vet ./...` MUST pass. No warnings tolerated.
+- `go vet ./...` and `go tool staticcheck ./...` MUST pass. No warnings tolerated.
 
 ## Task Workflow (Overseer)
 

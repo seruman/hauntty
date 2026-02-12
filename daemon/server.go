@@ -188,7 +188,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 			target := attached
 			if m.Name != "" {
 				s.mu.RLock()
-				target, _ = s.sessions[m.Name]
+				target = s.sessions[m.Name]
 				s.mu.RUnlock()
 			}
 			if target != nil {
