@@ -62,6 +62,8 @@ func New(ctx context.Context, wasmBytes []byte, cfg *config.DaemonConfig) (*Serv
 }
 
 func (s *Server) Listen() error {
+	CleanStaleTmp()
+
 	dir := socketDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create socket dir: %w", err)
@@ -300,7 +302,13 @@ func (s *Server) handleList(conn *protocol.Conn) {
 
 	dead, _ := ListDeadSessions(running)
 	for _, name := range dead {
-		sessions = append(sessions, protocol.Session{Name: name, State: "dead"})
+		ps := protocol.Session{Name: name, State: "dead"}
+		if state, err := LoadState(name); err == nil {
+			ps.Cols = state.Cols
+			ps.Rows = state.Rows
+			ps.CreatedAt = uint32(state.SavedAt.Unix())
+		}
+		sessions = append(sessions, ps)
 	}
 
 	if err := conn.WriteMessage(&protocol.Sessions{Sessions: sessions}); err != nil {
