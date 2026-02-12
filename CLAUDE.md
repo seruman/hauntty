@@ -52,8 +52,7 @@
 
 ## Formatting
 
-- MUST run `gofumpt` and `goimports` after completing each task, before review.
-- MUST run `go fix ./...` after completing each task to apply modern Go idioms (slices.Contains, maps.Copy, min/max, strings.Cut, etc.).
+- MUST run `gofumpt`, `goimports`, and `go fix ./...` BEFORE `os task complete` (since complete auto-commits).
 - `go vet ./...` MUST pass. No warnings tolerated.
 
 ## Task Workflow (Overseer)
@@ -67,13 +66,16 @@ Use the `os` binary for all task management.
 
 ### Lifecycle
 - `os task create -d "description" [--context "..."] [--parent ID] [--blocked-by ID1,ID2]`
-- `os task start ID` — creates a `task/{id}` git branch and checks it out.
-- `os task complete ID [--result "..."] [--learning "..."]` — commits changes and cleans up branch.
+- `os task start ID` — creates a `task/{id}` git branch at current HEAD and checks it out. Records the current commit as `start_commit`.
+- `os task complete ID [--result "..."] [--learning "..."]` — commits changes, checks out back to `start_commit` (not main), then deletes the task branch.
 - Auto-completes parent when all siblings are done.
 
 ### VCS constraints
-- `os task start` and `os task complete` REQUIRE a clean working tree. MUST commit or stash before calling either.
+- `os task start` and `os task complete` REQUIRE a clean working tree.
 - `os task start` changes HEAD — it checks out a new branch. Be aware of which branch you're on.
+- `os task complete` returns HEAD to where you were when you called `start`, not to main. If you started from main, you'll return to main. If you started from another task branch, you'll return there.
+- `os task complete` commits ALL changes in the working tree. MUST NOT have uncommitted changes from other work when completing.
+- Overseer v1 is single-working-tree. Complete tasks one at a time: start → work → complete → start next. Do NOT attempt to interleave VCS-managed tasks.
 
 ### Context & learnings
 - Add as much context to task descriptions as possible — they are your plan log.
@@ -87,7 +89,8 @@ Use the `os` binary for all task management.
 
 ## Git
 
-- MUST NOT commit without explicit user approval. Always ask first.
+- Overseer (`os task complete`) is the primary commit path — it commits automatically.
+- MUST NOT run `git commit` manually without explicit user approval.
 - Commit message style: Go stdlib (e.g., `cmd/ht: add session timeout flag`).
 - Use imperative mood: "add", "fix", "remove" — not "added", "fixed", "removed".
 - Describe *what* changed and *why*, not *how*. Never explain implementation details.
