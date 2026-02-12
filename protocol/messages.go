@@ -10,15 +10,17 @@ const (
 	TypeKill   uint8 = 0x06
 	TypeSend   uint8 = 0x07
 	TypeDump   uint8 = 0x08
+	TypePrune  uint8 = 0x09
 
 	// Daemon → Client
-	TypeOK           uint8 = 0x80
-	TypeError        uint8 = 0x81
-	TypeOutput       uint8 = 0x82
-	TypeState        uint8 = 0x83
-	TypeSessions     uint8 = 0x84
-	TypeExited       uint8 = 0x85
-	TypeDumpResponse uint8 = 0x86
+	TypeOK            uint8 = 0x80
+	TypeError         uint8 = 0x81
+	TypeOutput        uint8 = 0x82
+	TypeState         uint8 = 0x83
+	TypeSessions      uint8 = 0x84
+	TypeExited        uint8 = 0x85
+	TypeDumpResponse  uint8 = 0x86
+	TypePruneResponse uint8 = 0x87
 )
 
 type Message interface {
@@ -223,6 +225,12 @@ func (m *Dump) decode(d *Decoder) error {
 	m.Format, err = d.ReadU8()
 	return err
 }
+
+type Prune struct{}
+
+func (m *Prune) Type() uint8             { return TypePrune }
+func (m *Prune) encode(_ *Encoder) error { return nil }
+func (m *Prune) decode(_ *Decoder) error { return nil }
 
 // --- Daemon → Client messages ---
 
@@ -439,5 +447,21 @@ func (m *DumpResponse) encode(e *Encoder) error {
 func (m *DumpResponse) decode(d *Decoder) error {
 	var err error
 	m.Data, err = d.ReadBytes()
+	return err
+}
+
+type PruneResponse struct {
+	Count uint32
+}
+
+func (m *PruneResponse) Type() uint8 { return TypePruneResponse }
+
+func (m *PruneResponse) encode(e *Encoder) error {
+	return e.WriteU32(m.Count)
+}
+
+func (m *PruneResponse) decode(d *Decoder) error {
+	var err error
+	m.Count, err = d.ReadU32()
 	return err
 }

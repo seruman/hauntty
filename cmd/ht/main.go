@@ -24,6 +24,7 @@ type CLI struct {
 	Send   SendCmd   `cmd:"" help:"Send input to a session."`
 	Dump   DumpCmd   `cmd:"" help:"Dump session contents."`
 	Detach DetachCmd `cmd:"" help:"Detach from current session."`
+	Prune  PruneCmd  `cmd:"" help:"Delete dead session state files."`
 	Daemon DaemonCmd `cmd:"" help:"Start daemon in foreground."`
 }
 
@@ -202,6 +203,27 @@ func (cmd *DetachCmd) Run() error {
 	defer c.Close()
 
 	return c.DetachSession(sessionName)
+}
+
+type PruneCmd struct{}
+
+func (cmd *PruneCmd) Run() error {
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	count, err := c.Prune()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		fmt.Println("no dead sessions to prune")
+	} else {
+		fmt.Printf("pruned %d dead session(s)\n", count)
+	}
+	return nil
 }
 
 type DaemonCmd struct {

@@ -205,6 +205,8 @@ func (s *Server) handleConn(netConn net.Conn) {
 			s.handleSend(conn, m)
 		case *protocol.Dump:
 			s.handleDump(conn, m)
+		case *protocol.Prune:
+			s.handlePrune(conn)
 		}
 	}
 
@@ -399,6 +401,27 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 
 	if err := conn.WriteMessage(&protocol.DumpResponse{Data: dump.VT}); err != nil {
 		slog.Debug("write dump response", "err", err)
+	}
+}
+
+func (s *Server) handlePrune(conn *protocol.Conn) {
+	s.mu.RLock()
+	running := make(map[string]bool, len(s.sessions))
+	for name := range s.sessions {
+		running[name] = true
+	}
+	s.mu.RUnlock()
+
+	dead, _ := ListDeadSessions(running)
+	var count uint32
+	for _, name := range dead {
+		if err := CleanState(name); err == nil {
+			count++
+		}
+	}
+
+	if err := conn.WriteMessage(&protocol.PruneResponse{Count: count}); err != nil {
+		slog.Debug("write prune response", "err", err)
 	}
 }
 

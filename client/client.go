@@ -144,6 +144,24 @@ func (c *Client) Dump(name string, format uint8) ([]byte, error) {
 	}
 }
 
+func (c *Client) Prune() (uint32, error) {
+	if err := c.conn.WriteMessage(&protocol.Prune{}); err != nil {
+		return 0, fmt.Errorf("send prune: %w", err)
+	}
+	msg, err := c.conn.ReadMessage()
+	if err != nil {
+		return 0, fmt.Errorf("read prune response: %w", err)
+	}
+	switch m := msg.(type) {
+	case *protocol.PruneResponse:
+		return m.Count, nil
+	case *protocol.Error:
+		return 0, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+	default:
+		return 0, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+	}
+}
+
 func (c *Client) Detach() error {
 	return c.conn.WriteMessage(&protocol.Detach{})
 }
