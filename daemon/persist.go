@@ -73,12 +73,12 @@ func (p *Persister) SaveSession(name string, s *Session) error {
 		return fmt.Errorf("persist: dump screen: %w", err)
 	}
 
-	if err := os.MkdirAll(p.dir, 0700); err != nil {
+	if err := os.MkdirAll(p.dir, 0o700); err != nil {
 		return fmt.Errorf("persist: create dir: %w", err)
 	}
 
 	path := filepath.Join(p.dir, name+".state")
-	return os.WriteFile(path, dump.VT, 0600)
+	return os.WriteFile(path, dump.VT, 0o600)
 }
 
 // LoadState reads a persisted state file for the given session name.

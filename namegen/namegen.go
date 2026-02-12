@@ -3,6 +3,7 @@ package namegen
 import (
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"strings"
 )
 
@@ -56,20 +57,9 @@ func IsValid(name string) bool {
 	if len(parts) != 2 {
 		return false
 	}
-	adjOK := false
-	for _, a := range adjectives {
-		if a == parts[0] {
-			adjOK = true
-			break
-		}
-	}
+	adjOK := slices.Contains(adjectives, parts[0])
 	if !adjOK {
 		return false
 	}
-	for _, n := range nouns {
-		if n == parts[1] {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(nouns, parts[1])
 }

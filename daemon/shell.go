@@ -89,7 +89,7 @@ func setupZsh(command string, env []string, resourcesDir string) (string, []stri
 	userZshenv := filepath.Join(realZdotdir, ".zshenv")
 	fmt.Fprintf(&zshenv, "[[ -f %q ]] && source %q\n", userZshenv, userZshenv)
 
-	if err := os.WriteFile(filepath.Join(tmpDir, ".zshenv"), []byte(zshenv.String()), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, ".zshenv"), []byte(zshenv.String()), 0o600); err != nil {
 		os.RemoveAll(tmpDir)
 		return command, env, "", fmt.Errorf("write .zshenv: %w", err)
 	}

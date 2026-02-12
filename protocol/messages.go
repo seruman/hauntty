@@ -161,7 +161,7 @@ func (m *Detach) decode(d *Decoder) error {
 
 type List struct{}
 
-func (m *List) Type() uint8            { return TypeList }
+func (m *List) Type() uint8             { return TypeList }
 func (m *List) encode(_ *Encoder) error { return nil }
 func (m *List) decode(_ *Decoder) error { return nil }
 

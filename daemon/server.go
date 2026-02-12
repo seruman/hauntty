@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"os/signal"
@@ -65,7 +66,7 @@ func New(ctx context.Context, wasmBytes []byte, cfg *config.DaemonConfig) (*Serv
 // until the context is cancelled or a shutdown signal is received.
 func (s *Server) Listen() error {
 	dir := socketDir()
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create socket dir: %w", err)
 	}
 
@@ -392,7 +393,7 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) writePID() error {
-	return os.WriteFile(s.pidPath, []byte(strconv.Itoa(os.Getpid())), 0600)
+	return os.WriteFile(s.pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600)
 }
 
 // liveSessions returns a snapshot of currently tracked sessions.
@@ -400,8 +401,6 @@ func (s *Server) liveSessions() map[string]*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	m := make(map[string]*Session, len(s.sessions))
-	for k, v := range s.sessions {
-		m[k] = v
-	}
+	maps.Copy(m, s.sessions)
 	return m
 }

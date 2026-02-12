@@ -31,8 +31,8 @@ type Session struct {
 	clientMu    sync.Mutex
 	feedCh      chan []byte
 	done        chan struct{}
-	exitCode int32
-	tempDir  string
+	exitCode    int32
+	tempDir     string
 }
 
 func newSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {

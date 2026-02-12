@@ -44,7 +44,7 @@
 
 - MUST use `gotest.tools/v3` for test assertions and helpers.
 - MUST write tests for new features and bug fixes. Cover edge cases.
-- MUST assert full results. MUST NOT use partial assertions (contains, has prefix, substring matches). Use `assert.DeepEqual` for structs, even large ones.
+- MUST assert full results. MUST NOT use partial assertions (contains, has prefix, substring matches) — not even wrapped in `assert.Assert`. Compare the actual complete value. Use `assert.DeepEqual` for structs and byte slices, `assert.Equal` for scalars. When the expected value is unknown, run the test with a placeholder to capture the actual output from the diff, then use that.
 - Use table-driven tests when cases share the same test body.
 - When table cases need different behavior or setup, use `t.Run()` subtests instead.
 - MUST NOT extract shared test bodies into helper functions across `t.Run()` cases. Repeat the test body in each case for clarity.
