@@ -1,0 +1,58 @@
+diff --git a/src/terminal/formatter.zig b/src/terminal/formatter.zig
+index 4249187a7..3ac6070e6 100644
+--- a/src/terminal/formatter.zig
++++ b/src/terminal/formatter.zig
+@@ -288,7 +288,7 @@ pub const TerminalFormatter = struct {
+                 m.map.appendNTimes(
+                     m.alloc,
+                     self.terminal.screens.active.pages.getTopLeft(.screen),
+-                    discarding.count,
++                    @intCast(discarding.count),
+                 ) catch return error.WriteFailed;
+             }
+         }
+@@ -326,7 +326,7 @@ pub const TerminalFormatter = struct {
+                 m.map.appendNTimes(
+                     m.alloc,
+                     self.terminal.screens.active.pages.getTopLeft(.screen),
+-                    discarding.count,
++                    @intCast(discarding.count),
+                 ) catch return error.WriteFailed;
+             }
+         }
+@@ -410,7 +410,7 @@ pub const TerminalFormatter = struct {
+                             .y = last.y,
+                         };
+                     } else self.terminal.screens.active.pages.getTopLeft(.screen),
+-                    discarding.count,
++                    @intCast(discarding.count),
+                 ) catch return error.WriteFailed;
+             }
+         }
+@@ -683,7 +683,7 @@ pub const ScreenFormatter = struct {
+                         .y = last.y,
+                     };
+                 } else self.screen.pages.getTopLeft(.screen),
+-                discarding.count,
++                @intCast(discarding.count),
+             ) catch return error.WriteFailed;
+         }
+     }
+@@ -1225,7 +1225,7 @@ pub const PageFormatter = struct {
+                             &discarding.writer,
+                             &style,
+                         );
+-                        for (0..discarding.count) |_| map.map.append(map.alloc, .{
++                        for (0..@as(usize, @intCast(discarding.count))) |_| map.map.append(map.alloc, .{
+                             .x = x,
+                             .y = y,
+                         }) catch return error.WriteFailed;
+@@ -1243,7 +1243,7 @@ pub const PageFormatter = struct {
+                         if (self.point_map) |*map| {
+                             var discarding: std.Io.Writer.Discarding = .init(&.{});
+                             try self.writeCell(tag, &discarding.writer, cell);
+-                            for (0..discarding.count) |_| map.map.append(map.alloc, .{
++                            for (0..@as(usize, @intCast(discarding.count))) |_| map.map.append(map.alloc, .{
+                                 .x = x,
+                                 .y = y,
+                             }) catch return error.WriteFailed;

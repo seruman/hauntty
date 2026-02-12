@@ -35,8 +35,8 @@ type Server struct {
 	autoExit          bool
 }
 
-func New(ctx context.Context, wasmBytes []byte, cfg *config.DaemonConfig) (*Server, error) {
-	rt, err := wasm.NewRuntime(ctx, wasmBytes)
+func New(ctx context.Context, cfg *config.DaemonConfig) (*Server, error) {
+	rt, err := wasm.NewRuntime(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: init wasm runtime: %w", err)
 	}

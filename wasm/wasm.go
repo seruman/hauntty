@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,6 +12,11 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
+//go:generate sh ../vt/generate.sh
+
+//go:embed hauntty-vt.wasm
+var wasmBinary []byte
+
 const feedBufSize = 64 * 1024 // 64KB feed buffer
 
 type Runtime struct {
@@ -19,7 +25,7 @@ type Runtime struct {
 	counter  atomic.Uint64
 }
 
-func NewRuntime(ctx context.Context, wasmBytes []byte) (*Runtime, error) {
+func NewRuntime(ctx context.Context) (*Runtime, error) {
 	rt := wazero.NewRuntime(ctx)
 
 	_, err := rt.NewHostModuleBuilder("env").
@@ -38,7 +44,7 @@ func NewRuntime(ctx context.Context, wasmBytes []byte) (*Runtime, error) {
 		return nil, fmt.Errorf("wasm: instantiate env module: %w", err)
 	}
 
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	compiled, err := rt.CompileModule(ctx, wasmBinary)
 	if err != nil {
 		rt.Close(ctx)
 		return nil, fmt.Errorf("wasm: compile module: %w", err)

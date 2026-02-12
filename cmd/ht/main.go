@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -240,14 +239,8 @@ func (cmd *DaemonCmd) Run() error {
 		cfg.Daemon.AutoExit = true
 	}
 
-	wasmPath := resolveWASMPath()
-	wasmBytes, err := os.ReadFile(wasmPath)
-	if err != nil {
-		return fmt.Errorf("read wasm: %w", err)
-	}
-
 	ctx := context.Background()
-	srv, err := daemon.New(ctx, wasmBytes, &cfg.Daemon)
+	srv, err := daemon.New(ctx, &cfg.Daemon)
 	if err != nil {
 		return fmt.Errorf("init daemon: %w", err)
 	}
@@ -288,18 +281,4 @@ func ensureDaemon() error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for daemon socket at %s", sock)
-}
-
-// resolveWASMPath finds the WASM module: env var > next to executable > hardcoded fallback.
-func resolveWASMPath() string {
-	if p := os.Getenv("HAUNTTY_WASM_PATH"); p != "" {
-		return p
-	}
-	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "hauntty-vt.wasm")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return "vt/zig-out/bin/hauntty-vt.wasm"
 }

@@ -2,20 +2,12 @@ package wasm_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"gotest.tools/v3/assert"
 
 	"github.com/selman/hauntty/wasm"
 )
-
-func loadWasm(t *testing.T) []byte {
-	t.Helper()
-	b, err := os.ReadFile("../vt/zig-out/bin/hauntty-vt.wasm")
-	assert.NilError(t, err)
-	return b
-}
 
 func newTerminal(t *testing.T, ctx context.Context, rt *wasm.Runtime, cols, rows, scrollback uint32) *wasm.Terminal {
 	t.Helper()
@@ -26,7 +18,7 @@ func newTerminal(t *testing.T, ctx context.Context, rt *wasm.Runtime, cols, rows
 
 func TestBasicFeedAndDump(t *testing.T) {
 	ctx := context.Background()
-	rt, err := wasm.NewRuntime(ctx, loadWasm(t))
+	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
@@ -43,7 +35,7 @@ func TestBasicFeedAndDump(t *testing.T) {
 
 func TestResize(t *testing.T) {
 	ctx := context.Background()
-	rt, err := wasm.NewRuntime(ctx, loadWasm(t))
+	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
@@ -63,7 +55,7 @@ func TestResize(t *testing.T) {
 
 func TestCursorPosition(t *testing.T) {
 	ctx := context.Background()
-	rt, err := wasm.NewRuntime(ctx, loadWasm(t))
+	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
@@ -85,7 +77,7 @@ func TestCursorPosition(t *testing.T) {
 
 func TestAltScreen(t *testing.T) {
 	ctx := context.Background()
-	rt, err := wasm.NewRuntime(ctx, loadWasm(t))
+	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
@@ -111,7 +103,7 @@ func TestAltScreen(t *testing.T) {
 
 func TestMultipleTerminals(t *testing.T) {
 	ctx := context.Background()
-	rt, err := wasm.NewRuntime(ctx, loadWasm(t))
+	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
@@ -137,7 +129,7 @@ func TestMultipleTerminals(t *testing.T) {
 
 func TestReInit(t *testing.T) {
 	ctx := context.Background()
-	rt, err := wasm.NewRuntime(ctx, loadWasm(t))
+	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
