@@ -98,6 +98,57 @@ Use the `os` binary for all task management.
 - MUST NOT use vague messages like "fix bug" or "update code".
 - Reference relevant issue/ticket numbers when applicable.
 
+## Interactive Testing (bootty)
+
+Use `bootty` for automated interactive testing of `ht`. Spawn shell sessions
+and run `ht` commands inside them — the session stays alive after `ht` exits.
+
+```bash
+# Build ht first
+go build -o ht ./cmd/ht
+
+# Spawn shells (not ht directly — keeps session alive after commands exit)
+bootty spawn --name daemon
+bootty spawn --name client
+
+# Start daemon
+bootty type -s daemon "./ht daemon --auto-exit"
+bootty key -s daemon Enter
+bootty wait -s daemon "listening"
+
+# Attach to a session
+bootty type -s client "./ht attach my-session"
+bootty key -s client Enter
+bootty wait -s client "my-session"
+
+# Interact with the attached session
+bootty type -s client "echo hello"
+bootty key -s client Enter
+bootty wait -s client "hello"
+bootty screenshot -s client
+
+# Test detach — session returns to shell prompt, ready for next command
+bootty key -s client "Ctrl+]"
+bootty wait -s client "$"
+
+# Test list (reuse the same shell)
+bootty type -s client "./ht list"
+bootty key -s client Enter
+bootty wait -s client "my-session"
+bootty screenshot -s client
+
+# Cleanup
+bootty kill client
+bootty kill daemon
+```
+
+Key patterns:
+- Spawn shell sessions, run `ht` inside — session survives after `ht` exits.
+- Always `bootty wait` before interacting — ensures the app is ready.
+- Use `--name` to target specific sessions with `-s`.
+- `bootty screenshot --format text` for assertions, `--format vt` for escape sequences.
+- `bootty key` for special keys: `Enter`, `Escape`, `Ctrl+C`, `Up`, `Down`, etc.
+
 ## Communication
 
 - When in doubt, ask for clarification. MUST NOT assume or guess on ambiguous requirements.
