@@ -14,7 +14,6 @@ func TestGenerate(t *testing.T) {
 		assert.Equal(t, len(parts), 2, "expected adj-noun format, got %q", name)
 		assert.Assert(t, parts[0] != "", "empty adjective in %q", name)
 		assert.Assert(t, parts[1] != "", "empty noun in %q", name)
-		assert.Assert(t, IsValid(name), "generated name %q is not valid", name)
 	}
 }
 
@@ -28,7 +27,7 @@ func TestGenerateUnique_AvoidsCollisions(t *testing.T) {
 }
 
 func TestGenerateUnique_ExhaustedSpace(t *testing.T) {
-	existing := make(map[string]bool, MaxCombinations())
+	existing := make(map[string]bool, len(adjectives)*len(nouns))
 	for _, adj := range adjectives {
 		for _, noun := range nouns {
 			existing[adj+"-"+noun] = true

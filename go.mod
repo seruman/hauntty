@@ -13,9 +13,10 @@ require (
 
 require (
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
-	golang.org/x/mod v0.23.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/tools v0.30.0 // indirect
+	golang.org/x/mod v0.33.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260209163413-e7419c687ee4 // indirect
+	golang.org/x/tools v0.42.0 // indirect
 	honnef.co/go/tools v0.6.1 // indirect
 )
 
@@ -24,4 +25,7 @@ require (
 	gotest.tools/v3 v3.5.2
 )
 
-tool honnef.co/go/tools/cmd/staticcheck
+tool (
+	golang.org/x/tools/cmd/deadcode
+	honnef.co/go/tools/cmd/staticcheck
+)

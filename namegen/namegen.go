@@ -3,8 +3,6 @@ package namegen
 import (
 	"fmt"
 	"math/rand/v2"
-	"slices"
-	"strings"
 )
 
 var adjectives = []string{
@@ -44,18 +42,3 @@ func GenerateUnique(existing map[string]bool) string {
 	return fmt.Sprintf("%s-%d", name, rand.IntN(1000))
 }
 
-func MaxCombinations() int {
-	return len(adjectives) * len(nouns)
-}
-
-func IsValid(name string) bool {
-	parts := strings.SplitN(name, "-", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	adjOK := slices.Contains(adjectives, parts[0])
-	if !adjOK {
-		return false
-	}
-	return slices.Contains(nouns, parts[1])
-}
