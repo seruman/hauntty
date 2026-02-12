@@ -231,8 +231,19 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		if scrollback == 0 {
 			scrollback = s.defaultScrollback
 		}
+
+		// Check for a persisted dead session to restore.
 		var err error
-		sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT)
+		if state, serr := LoadState(name); serr == nil {
+			slog.Info("restoring dead session", "session", name)
+			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT, state)
+			if err == nil {
+				CleanState(name)
+			}
+		}
+		if sess == nil {
+			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT)
+		}
 		if err != nil {
 			s.mu.Unlock()
 			if werr := conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()}); werr != nil {

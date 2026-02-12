@@ -103,6 +103,90 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 	return s, nil
 }
 
+func restoreSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState) (*Session, error) {
+	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(state.VT) > 0 {
+		if err := term.Feed(ctx, state.VT); err != nil {
+			term.Close(ctx)
+			return nil, err
+		}
+	}
+	if state.IsAltScreen {
+		if err := term.Feed(ctx, []byte("\x1b[?1049l")); err != nil {
+			term.Close(ctx)
+			return nil, err
+		}
+	}
+	// DECSTR: clear modes left by the dead process.
+	if err := term.Feed(ctx, []byte("\x1b[!p")); err != nil {
+		term.Close(ctx)
+		return nil, err
+	}
+
+	if command == "" {
+		for _, e := range env {
+			if len(e) > 6 && e[:6] == "SHELL=" {
+				command = e[6:]
+				break
+			}
+		}
+		if command == "" {
+			command = os.Getenv("SHELL")
+		}
+		if command == "" {
+			command = "/bin/sh"
+		}
+	}
+
+	shellCmd, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
+	if err != nil {
+		slog.Warn("shell integration setup failed, continuing without it", "err", err)
+		shellCmd = command
+		shellEnv = env
+	}
+
+	cmd := exec.Command(shellCmd)
+	cmd.Env = shellEnv
+
+	ws := &pty.Winsize{Rows: rows, Cols: cols}
+	ptmx, err := pty.StartWithSize(cmd, ws)
+	if err != nil {
+		term.Close(ctx)
+		if tempDir != "" {
+			os.RemoveAll(tempDir)
+		}
+		return nil, err
+	}
+
+	if state.Cols != cols || state.Rows != rows {
+		if err := term.Resize(ctx, uint32(cols), uint32(rows)); err != nil {
+			slog.Warn("wasm resize on restore", "session", name, "err", err)
+		}
+	}
+
+	s := &Session{
+		Name:      name,
+		Cols:      cols,
+		Rows:      rows,
+		PID:       uint32(cmd.Process.Pid),
+		CreatedAt: time.Now(),
+		ptmx:      ptmx,
+		cmd:       cmd,
+		term:      term,
+		feedCh:    make(chan []byte, 64),
+		done:      make(chan struct{}),
+		tempDir:   tempDir,
+	}
+
+	go s.feedLoop(ctx)
+	go s.readLoop(ctx)
+	return s, nil
+}
+
 // Runs in its own goroutine so WASM processing never blocks the client path.
 func (s *Session) feedLoop(ctx context.Context) {
 	for data := range s.feedCh {
