@@ -55,7 +55,9 @@ func (cmd *AttachCmd) Run() error {
 	return c.RunAttach(cmd.Name, command)
 }
 
-type ListCmd struct{}
+type ListCmd struct {
+	All bool `short:"a" help:"Show all sessions including dead."`
+}
 
 func (cmd *ListCmd) Run() error {
 	c, err := client.Connect()
@@ -69,23 +71,31 @@ func (cmd *ListCmd) Run() error {
 		return err
 	}
 
-	if len(sessions.Sessions) == 0 {
-		fmt.Println("no sessions")
-		return nil
-	}
-
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tPID\tCREATED")
+	n := 0
 	for _, s := range sessions.Sessions {
+		if !cmd.All && s.State == "dead" {
+			continue
+		}
+		n++
 		if s.PID == 0 {
-			fmt.Fprintf(w, "%s\t%s\t-\t-\t-\n", s.Name, s.State)
+			created := "-"
+			if s.CreatedAt != 0 {
+				created = time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
+			}
+			fmt.Fprintf(w, "%s\t%s\t%dx%d\t-\t%s\n", s.Name, s.State, s.Cols, s.Rows, created)
 		} else {
 			created := time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
 			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%d\t%s\n",
 				s.Name, s.State, s.Cols, s.Rows, s.PID, created)
 		}
 	}
-	w.Flush()
+	if n == 0 {
+		fmt.Fprintln(os.Stderr, "no sessions")
+	} else {
+		w.Flush()
+	}
 	return nil
 }
 
