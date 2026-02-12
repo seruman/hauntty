@@ -56,14 +56,34 @@
 - MUST run `go fix ./...` after completing each task to apply modern Go idioms (slices.Contains, maps.Copy, min/max, strings.Cut, etc.).
 - `go vet ./...` MUST pass. No warnings tolerated.
 
-## Task Workflow
+## Task Workflow (Overseer)
 
-- Use Overseer (`os` binary) to track all work.
-- Create a task before starting. Set it to active when you begin. Mark done when finished.
-- Add as much context to task descriptions as possible — they are your plan log.
-- Update task details if the plan changes mid-task.
-- Declare task dependencies in Overseer to track ordering.
+Use the `os` binary for all task management.
+
+### Hierarchy
+- Milestone (depth 0) → Task (depth 1) → Subtask (depth 2, max depth).
+- Create milestones for features, tasks for units of work, subtasks for atomic steps.
 - Prefer many small, focused tasks over fewer large ones.
+
+### Lifecycle
+- `os task create -d "description" [--context "..."] [--parent ID] [--blocked-by ID1,ID2]`
+- `os task start ID` — creates a `task/{id}` git branch and checks it out.
+- `os task complete ID [--result "..."] [--learning "..."]` — commits changes and cleans up branch.
+- Auto-completes parent when all siblings are done.
+
+### VCS constraints
+- `os task start` and `os task complete` REQUIRE a clean working tree. MUST commit or stash before calling either.
+- `os task start` changes HEAD — it checks out a new branch. Be aware of which branch you're on.
+
+### Context & learnings
+- Add as much context to task descriptions as possible — they are your plan log.
+- Update task details (`os task update ID --context "..."`) if the plan changes mid-task.
+- Use `--learning` on complete to record insights. Learnings bubble up to the parent.
+
+### Dependencies
+- `os task block ID --by BLOCKER_ID` to declare ordering.
+- Cancelled tasks do NOT satisfy blockers — only completion unblocks dependents.
+- `os task next-ready` finds the deepest unblocked leaf to work on next.
 
 ## Git
 
