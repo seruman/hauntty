@@ -11,50 +11,223 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/alecthomas/kong"
 	"github.com/selman/hauntty/client"
 	"github.com/selman/hauntty/config"
 	"github.com/selman/hauntty/daemon"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(1)
-	}
-	switch os.Args[1] {
-	case "attach", "a":
-		cmdAttach(os.Args[2:])
-	case "list", "ls":
-		cmdList()
-	case "kill":
-		cmdKill(os.Args[2:])
-	case "send":
-		cmdSend(os.Args[2:])
-	case "dump":
-		cmdDump(os.Args[2:])
-	case "detach":
-		cmdDetach()
-	case "daemon":
-		cmdDaemon(os.Args[2:])
-	default:
-		fmt.Fprintf(os.Stderr, "ht: unknown command %q\n", os.Args[1])
-		usage()
-		os.Exit(1)
-	}
+type CLI struct {
+	Attach AttachCmd `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
+	List   ListCmd   `cmd:"" aliases:"ls" help:"List sessions."`
+	Kill   KillCmd   `cmd:"" help:"Kill a session."`
+	Send   SendCmd   `cmd:"" help:"Send input to a session."`
+	Dump   DumpCmd   `cmd:"" help:"Dump session contents."`
+	Detach DetachCmd `cmd:"" help:"Detach from current session."`
+	Daemon DaemonCmd `cmd:"" help:"Start daemon in foreground."`
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `Usage: ht <command> [args]
+type AttachCmd struct {
+	Name    string   `arg:"" optional:"" help:"Session name."`
+	Command []string `arg:"" optional:"" passthrough:"" help:"Command to run (after --)."`
+}
 
-Commands:
-  attach [name] [-- command]   Attach to a session (create if needed)
-  list                         List sessions
-  kill <name>                  Kill a session
-  send <name> <input>          Send input to a session
-  dump <name>                  Dump session contents
-  detach                       Detach from current session
-  daemon                       Start daemon in foreground
-`)
+func (cmd *AttachCmd) Run() error {
+	if err := ensureDaemon(); err != nil {
+		return err
+	}
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	var command string
+	if len(cmd.Command) > 0 {
+		// Strip leading "--" that kong passes through.
+		args := cmd.Command
+		if len(args) > 0 && args[0] == "--" {
+			args = args[1:]
+		}
+		command = strings.Join(args, " ")
+	}
+
+	return c.RunAttach(cmd.Name, command)
+}
+
+type ListCmd struct{}
+
+func (cmd *ListCmd) Run() error {
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	sessions, err := c.List()
+	if err != nil {
+		return err
+	}
+
+	if len(sessions.Sessions) == 0 {
+		fmt.Println("no sessions")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tPID\tCREATED")
+	for _, s := range sessions.Sessions {
+		if s.PID == 0 {
+			fmt.Fprintf(w, "%s\t%s\t-\t-\t-\n", s.Name, s.State)
+		} else {
+			created := time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
+			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%d\t%s\n",
+				s.Name, s.State, s.Cols, s.Rows, s.PID, created)
+		}
+	}
+	w.Flush()
+	return nil
+}
+
+type KillCmd struct {
+	Name string `arg:"" help:"Session name."`
+}
+
+func (cmd *KillCmd) Run() error {
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if err := c.Kill(cmd.Name); err != nil {
+		return err
+	}
+	fmt.Printf("killed session %q\n", cmd.Name)
+	return nil
+}
+
+type SendCmd struct {
+	Name string   `arg:"" help:"Session name."`
+	Args []string `arg:"" passthrough:"" help:"Input text and --keys interleaved."`
+}
+
+func (cmd *SendCmd) Run() error {
+	args := cmd.Args
+	// Strip leading "--" that kong passes through.
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+
+	var data []byte
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--keys" {
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--keys requires a value")
+			}
+			keyBytes, err := client.ParseKeyNotation(args[i])
+			if err != nil {
+				return err
+			}
+			data = append(data, keyBytes...)
+		} else {
+			data = append(data, args[i]...)
+		}
+	}
+
+	if len(data) == 0 {
+		return fmt.Errorf("send requires input")
+	}
+
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	return c.Send(cmd.Name, data)
+}
+
+type DumpCmd struct {
+	Name   string `arg:"" help:"Session name."`
+	Format string `enum:"plain,vt,html" default:"plain" help:"Output format (plain, vt, html)."`
+}
+
+func (cmd *DumpCmd) Run() error {
+	var format uint8
+	switch cmd.Format {
+	case "vt":
+		format = 1
+	case "html":
+		format = 2
+	}
+
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	data, err := c.Dump(cmd.Name, format)
+	if err != nil {
+		return err
+	}
+	os.Stdout.Write(data)
+	return nil
+}
+
+type DetachCmd struct{}
+
+func (cmd *DetachCmd) Run() error {
+	sessionName := os.Getenv("HAUNTTY_SESSION")
+	if sessionName == "" {
+		return fmt.Errorf("not inside a hauntty session")
+	}
+
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	return c.DetachSession(sessionName)
+}
+
+type DaemonCmd struct {
+	AutoExit bool `help:"Exit when last session dies."`
+}
+
+func (cmd *DaemonCmd) Run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if cmd.AutoExit {
+		cfg.Daemon.AutoExit = true
+	}
+
+	wasmPath := resolveWASMPath()
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		return fmt.Errorf("read wasm: %w", err)
+	}
+
+	ctx := context.Background()
+	srv, err := daemon.New(ctx, wasmBytes, &cfg.Daemon)
+	if err != nil {
+		return fmt.Errorf("init daemon: %w", err)
+	}
+
+	return srv.Listen()
+}
+
+func main() {
+	var cli CLI
+	ctx := kong.Parse(&cli, kong.UsageOnError())
+	err := ctx.Run()
+	ctx.FatalIfErrorf(err)
 }
 
 // ensureDaemon starts the daemon if it is not already running and waits
@@ -74,10 +247,8 @@ func ensureDaemon() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start daemon: %w", err)
 	}
-	// Release the child so it doesn't become a zombie.
 	cmd.Process.Release()
 
-	// Wait up to 3 seconds for the socket to appear.
 	sock := client.SocketPath()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -89,233 +260,7 @@ func ensureDaemon() error {
 	return fmt.Errorf("timed out waiting for daemon socket at %s", sock)
 }
 
-func cmdAttach(args []string) {
-	var name, command string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--" {
-			if i+1 < len(args) {
-				command = strings.Join(args[i+1:], " ")
-			}
-			break
-		}
-		if name == "" {
-			name = args[i]
-		}
-	}
-
-	if err := ensureDaemon(); err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-
-	c, err := client.Connect()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	defer c.Close()
-
-	if err := c.RunAttach(name, command); err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func cmdList() {
-	c, err := client.Connect()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	defer c.Close()
-
-	sessions, err := c.List()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(sessions.Sessions) == 0 {
-		fmt.Println("no sessions")
-		return
-	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tPID\tCREATED")
-	for _, s := range sessions.Sessions {
-		if s.PID == 0 {
-			fmt.Fprintf(w, "%s\t%s\t-\t-\t-\n", s.Name, s.State)
-		} else {
-			created := time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
-			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%d\t%s\n",
-				s.Name, s.State, s.Cols, s.Rows, s.PID, created)
-		}
-	}
-	w.Flush()
-}
-
-func cmdKill(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "ht: kill requires a session name")
-		os.Exit(1)
-	}
-
-	c, err := client.Connect()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	defer c.Close()
-
-	if err := c.Kill(args[0]); err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("killed session %q\n", args[0])
-}
-
-func cmdSend(args []string) {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "ht: send requires a session name and input")
-		os.Exit(1)
-	}
-
-	name := args[0]
-	args = args[1:]
-
-	// Process args left-to-right: plain args are literal text, --keys args are key notation.
-	var data []byte
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--keys" {
-			i++
-			if i >= len(args) {
-				fmt.Fprintln(os.Stderr, "ht: --keys requires a value")
-				os.Exit(1)
-			}
-			keyBytes, err := client.ParseKeyNotation(args[i])
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-				os.Exit(1)
-			}
-			data = append(data, keyBytes...)
-		} else {
-			data = append(data, args[i]...)
-		}
-	}
-
-	c, err := client.Connect()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	defer c.Close()
-
-	if err := c.Send(name, data); err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func cmdDump(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "ht: dump requires a session name")
-		os.Exit(1)
-	}
-
-	name := args[0]
-	var format uint8 // 0=plain (default)
-
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--format" {
-			i++
-			if i >= len(args) {
-				fmt.Fprintln(os.Stderr, "ht: --format requires a value")
-				os.Exit(1)
-			}
-			switch args[i] {
-			case "plain":
-				format = 0
-			case "vt":
-				format = 1
-			case "html":
-				format = 2
-			default:
-				fmt.Fprintf(os.Stderr, "ht: unknown format %q (use plain, vt, or html)\n", args[i])
-				os.Exit(1)
-			}
-		}
-	}
-
-	c, err := client.Connect()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	defer c.Close()
-
-	data, err := c.Dump(name, format)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(data)
-}
-
-func cmdDetach() {
-	sessionName := os.Getenv("HAUNTTY_SESSION")
-	if sessionName == "" {
-		fmt.Fprintln(os.Stderr, "ht: not inside a hauntty session")
-		os.Exit(1)
-	}
-
-	c, err := client.Connect()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-	defer c.Close()
-
-	if err := c.DetachSession(sessionName); err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func cmdDaemon(args []string) {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: load config: %v\n", err)
-		os.Exit(1)
-	}
-
-	// --auto-exit flag overrides config.
-	for _, arg := range args {
-		if arg == "--auto-exit" {
-			cfg.Daemon.AutoExit = true
-		}
-	}
-
-	wasmPath := resolveWASMPath()
-	wasmBytes, err := os.ReadFile(wasmPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: read wasm: %v\n", err)
-		os.Exit(1)
-	}
-
-	ctx := context.Background()
-	srv, err := daemon.New(ctx, wasmBytes, &cfg.Daemon)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ht: init daemon: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := srv.Listen(); err != nil {
-		fmt.Fprintf(os.Stderr, "ht: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// resolveWASMPath finds the WASM module: env var → next to executable → hardcoded fallback.
+// resolveWASMPath finds the WASM module: env var > next to executable > hardcoded fallback.
 func resolveWASMPath() string {
 	if p := os.Getenv("HAUNTTY_WASM_PATH"); p != "" {
 		return p
