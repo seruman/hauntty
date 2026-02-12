@@ -83,7 +83,6 @@ func TestCursorPosition(t *testing.T) {
 	assert.Equal(t, dump.CursorRow, uint32(0))
 }
 
-
 func TestAltScreen(t *testing.T) {
 	ctx := context.Background()
 	rt, err := wasm.NewRuntime(ctx, loadWasm(t))

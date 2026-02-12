@@ -41,4 +41,3 @@ func GenerateUnique(existing map[string]bool) string {
 	name := Generate()
 	return fmt.Sprintf("%s-%d", name, rand.IntN(1000))
 }
-
