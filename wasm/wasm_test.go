@@ -83,25 +83,6 @@ func TestCursorPosition(t *testing.T) {
 	assert.Equal(t, dump.CursorRow, uint32(0))
 }
 
-func TestReset(t *testing.T) {
-	ctx := context.Background()
-	rt, err := wasm.NewRuntime(ctx, loadWasm(t))
-	assert.NilError(t, err)
-	defer rt.Close(ctx)
-
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
-	defer term.Close(ctx)
-
-	err = term.Feed(ctx, []byte("some content"))
-	assert.NilError(t, err)
-	err = term.Reset(ctx)
-	assert.NilError(t, err)
-
-	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
-	assert.NilError(t, err)
-	assert.Equal(t, dump.CursorRow, uint32(0))
-	assert.Equal(t, dump.CursorCol, uint32(0))
-}
 
 func TestAltScreen(t *testing.T) {
 	ctx := context.Background()

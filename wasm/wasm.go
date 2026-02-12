@@ -67,7 +67,6 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		gxDumpPtr:    mod.ExportedFunction("gx_dump_ptr"),
 		gxGetCursor:  mod.ExportedFunction("gx_get_cursor_pos"),
 		gxIsAltScr:   mod.ExportedFunction("gx_is_alt_screen"),
-		gxReset:      mod.ExportedFunction("gx_reset"),
 	}
 
 	for name, fn := range map[string]api.Function{
@@ -81,7 +80,6 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		"gx_dump_ptr":       t.gxDumpPtr,
 		"gx_get_cursor_pos": t.gxGetCursor,
 		"gx_is_alt_screen":  t.gxIsAltScr,
-		"gx_reset":          t.gxReset,
 	} {
 		if fn == nil {
 			mod.Close(ctx)
@@ -132,7 +130,6 @@ type Terminal struct {
 	gxDumpPtr    api.Function
 	gxGetCursor  api.Function
 	gxIsAltScr   api.Function
-	gxReset      api.Function
 
 	feedPtr uint32
 	feedLen uint32
@@ -173,20 +170,6 @@ func (t *Terminal) Resize(ctx context.Context, cols, rows uint32) error {
 	}
 	if int32(results[0]) != 0 {
 		return fmt.Errorf("wasm: gx_resize returned %d", int32(results[0]))
-	}
-	return nil
-}
-
-func (t *Terminal) Reset(ctx context.Context) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	results, err := t.gxReset.Call(ctx)
-	if err != nil {
-		return fmt.Errorf("wasm: gx_reset: %w", err)
-	}
-	if int32(results[0]) != 0 {
-		return fmt.Errorf("wasm: gx_reset returned %d", int32(results[0]))
 	}
 	return nil
 }
