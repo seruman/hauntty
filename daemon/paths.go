@@ -14,12 +14,10 @@ func socketDir() string {
 	return filepath.Join(tmpdir, fmt.Sprintf("hauntty-%d", os.Getuid()))
 }
 
-// SocketPath returns the path to the daemon Unix socket.
 func SocketPath() string {
 	return filepath.Join(socketDir(), "hauntty.sock")
 }
 
-// PIDPath returns the path to the daemon PID file.
 func PIDPath() string {
 	return filepath.Join(socketDir(), "hauntty.pid")
 }

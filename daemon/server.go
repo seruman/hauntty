@@ -21,7 +21,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Server is the hauntty daemon. It listens on a Unix socket and manages sessions.
 type Server struct {
 	socketPath        string
 	pidPath           string
@@ -36,7 +35,6 @@ type Server struct {
 	autoExit          bool
 }
 
-// New creates a new daemon Server with the given compiled WASM bytes and config.
 func New(ctx context.Context, wasmBytes []byte, cfg *config.DaemonConfig) (*Server, error) {
 	rt, err := wasm.NewRuntime(ctx, wasmBytes)
 	if err != nil {
@@ -63,15 +61,12 @@ func New(ctx context.Context, wasmBytes []byte, cfg *config.DaemonConfig) (*Serv
 	return s, nil
 }
 
-// Listen creates the Unix socket, writes the PID file, and accepts connections
-// until the context is cancelled or a shutdown signal is received.
 func (s *Server) Listen() error {
 	dir := socketDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create socket dir: %w", err)
 	}
 
-	// Remove stale socket if present.
 	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("remove stale socket", "path", s.socketPath, "err", err)
 	}
@@ -87,7 +82,6 @@ func (s *Server) Listen() error {
 		return err
 	}
 
-	// Handle shutdown signals.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
@@ -123,7 +117,6 @@ func (s *Server) Listen() error {
 func (s *Server) handleConn(netConn net.Conn) {
 	defer netConn.Close()
 
-	// Verify peer UID.
 	unixConn, ok := netConn.(*net.UnixConn)
 	if !ok {
 		return
@@ -153,7 +146,6 @@ func (s *Server) handleConn(netConn net.Conn) {
 
 	conn := protocol.NewConn(netConn)
 
-	// Handshake.
 	clientVer, err := conn.AcceptHandshake()
 	if err != nil {
 		return
@@ -248,7 +240,6 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		}
 		s.sessions[name] = sess
 
-		// Remove session from map and clean up state file when it exits.
 		go func() {
 			<-sess.done
 			s.mu.Lock()
@@ -392,11 +383,9 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	}
 }
 
-// Shutdown gracefully stops the daemon, killing all sessions and cleaning up.
 func (s *Server) Shutdown() {
 	if s.persister != nil {
 		s.persister.Stop()
-		// Final save of all sessions before shutdown.
 		s.persister.saveAll()
 	}
 
@@ -427,7 +416,6 @@ func (s *Server) writePID() error {
 	return os.WriteFile(s.pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600)
 }
 
-// liveSessions returns a snapshot of currently tracked sessions.
 func (s *Server) liveSessions() map[string]*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

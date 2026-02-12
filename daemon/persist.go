@@ -12,7 +12,6 @@ import (
 	"github.com/selman/hauntty/wasm"
 )
 
-// Persister periodically saves terminal state for all sessions.
 type Persister struct {
 	sessions func() map[string]*Session
 	dir      string
@@ -21,7 +20,6 @@ type Persister struct {
 	cancel   context.CancelFunc
 }
 
-// NewPersister creates a new Persister that periodically dumps session state.
 func NewPersister(sessions func() map[string]*Session, interval time.Duration) *Persister {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Persister{
@@ -33,12 +31,10 @@ func NewPersister(sessions func() map[string]*Session, interval time.Duration) *
 	}
 }
 
-// Start begins the periodic save loop in a goroutine.
 func (p *Persister) Start() {
 	go p.loop()
 }
 
-// Stop cancels the periodic save loop.
 func (p *Persister) Stop() {
 	p.cancel()
 }
@@ -66,7 +62,6 @@ func (p *Persister) saveAll() {
 	}
 }
 
-// SaveSession dumps a single session's screen state to disk.
 func (p *Persister) SaveSession(name string, s *Session) error {
 	dump, err := s.dumpScreen(p.ctx, wasm.DumpVTFull)
 	if err != nil {
@@ -81,13 +76,11 @@ func (p *Persister) SaveSession(name string, s *Session) error {
 	return os.WriteFile(path, dump.VT, 0o600)
 }
 
-// LoadState reads a persisted state file for the given session name.
 func LoadState(name string) ([]byte, error) {
 	path := filepath.Join(stateDir(), name+".state")
 	return os.ReadFile(path)
 }
 
-// ListDeadSessions returns names of sessions that have state files but no running session.
 func ListDeadSessions(running map[string]bool) ([]string, error) {
 	dir := stateDir()
 	entries, err := os.ReadDir(dir)
@@ -111,7 +104,6 @@ func ListDeadSessions(running map[string]bool) ([]string, error) {
 	return dead, nil
 }
 
-// CleanState removes a session's state file.
 func CleanState(name string) error {
 	path := filepath.Join(stateDir(), name+".state")
 	err := os.Remove(path)

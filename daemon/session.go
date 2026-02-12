@@ -14,7 +14,6 @@ import (
 	"github.com/selman/hauntty/wasm"
 )
 
-// Session represents a single terminal session managed by the daemon.
 type Session struct {
 	Name      string
 	Cols      uint16
@@ -37,7 +36,6 @@ type Session struct {
 
 func newSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
 	if command == "" {
-		// Prefer SHELL from the client's forwarded env over the daemon's own env.
 		for _, e := range env {
 			if len(e) > 6 && e[:6] == "SHELL=" {
 				command = e[6:]
@@ -52,7 +50,6 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 		}
 	}
 
-	// Apply shell integration (sets HAUNTTY_SESSION, ZDOTDIR, etc.).
 	shellCmd, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
 	if err != nil {
 		slog.Warn("shell integration setup failed, continuing without it", "err", err)
@@ -106,7 +103,6 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 	return s, nil
 }
 
-// feedLoop consumes PTY output from feedCh and feeds it to the WASM terminal.
 // Runs in its own goroutine so WASM processing never blocks the client path.
 func (s *Session) feedLoop(ctx context.Context) {
 	for data := range s.feedCh {
@@ -116,9 +112,6 @@ func (s *Session) feedLoop(ctx context.Context) {
 	}
 }
 
-// readLoop reads PTY output, forwards it to the attached client and queues it
-// for WASM state machine processing. The client write uses buf[:n] directly
-// (WriteMessage copies internally), avoiding an allocation on the hot path.
 // Backpressure: WriteMessage calls net.Conn.Write synchronously. When the
 // kernel socket send buffer is full, Write blocks, which blocks readLoop,
 // which blocks PTY reads, which makes the child process block on write —
@@ -128,7 +121,7 @@ func (s *Session) readLoop(ctx context.Context) {
 	for {
 		n, err := s.ptmx.Read(buf)
 		if n > 0 {
-			// Client write: pass buf slice directly (WriteMessage copies internally).
+			// WriteMessage copies internally, so buf[:n] is safe to reuse.
 			s.clientMu.Lock()
 			if s.client != nil {
 				if werr := s.client.WriteMessage(&protocol.Output{Data: buf[:n]}); werr != nil {
@@ -137,7 +130,7 @@ func (s *Session) readLoop(ctx context.Context) {
 			}
 			s.clientMu.Unlock()
 
-			// Async WASM feed: copy needed since feedLoop consumes later.
+			// Copy needed: feedLoop consumes asynchronously after buf is reused.
 			data := make([]byte, n)
 			copy(data, buf[:n])
 			select {
@@ -168,10 +161,8 @@ func (s *Session) readLoop(ctx context.Context) {
 }
 
 func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows uint16) error {
-	// Disconnect any existing client (closes their connection).
 	s.disconnectClient()
 
-	// Send state dump to the new client (full VT for state restoration).
 	dump, err := s.term.DumpScreen(context.Background(), wasm.DumpVTFull)
 	if err != nil {
 		return err
@@ -186,13 +177,11 @@ func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows
 		return err
 	}
 
-	// Set the new client.
 	s.clientMu.Lock()
 	s.client = conn
 	s.clientClose = closeConn
 	s.clientMu.Unlock()
 
-	// Resize if client dimensions differ.
 	if cols != s.Cols || rows != s.Rows {
 		s.resize(cols, rows)
 	}

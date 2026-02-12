@@ -1,6 +1,5 @@
 package protocol
 
-// Message type constants.
 const (
 	// Client → Daemon
 	TypeAttach uint8 = 0x01
@@ -22,14 +21,12 @@ const (
 	TypeDumpResponse uint8 = 0x86
 )
 
-// Message is the interface implemented by all protocol messages.
 type Message interface {
 	Type() uint8
 	encode(*Encoder) error
 	decode(*Decoder) error
 }
 
-// Session is an element in the SESSIONS message array.
 type Session struct {
 	Name      string
 	State     string

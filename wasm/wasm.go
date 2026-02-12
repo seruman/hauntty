@@ -13,18 +13,15 @@ import (
 
 const feedBufSize = 64 * 1024 // 64KB feed buffer
 
-// Runtime holds a compiled WASM module and can create Terminal instances.
 type Runtime struct {
 	rt       wazero.Runtime
 	compiled wazero.CompiledModule
 	counter  atomic.Uint64
 }
 
-// NewRuntime compiles the hauntty-vt WASM bytes and prepares the runtime.
 func NewRuntime(ctx context.Context, wasmBytes []byte) (*Runtime, error) {
 	rt := wazero.NewRuntime(ctx)
 
-	// Provide the env.log host import.
 	_, err := rt.NewHostModuleBuilder("env").
 		NewFunctionBuilder().
 		WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
@@ -50,7 +47,6 @@ func NewRuntime(ctx context.Context, wasmBytes []byte) (*Runtime, error) {
 	return &Runtime{rt: rt, compiled: compiled}, nil
 }
 
-// NewTerminal instantiates a new WASM module and initializes a terminal.
 func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32) (*Terminal, error) {
 	name := fmt.Sprintf("hauntty-vt-%d", r.counter.Add(1))
 
@@ -74,7 +70,6 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		gxReset:      mod.ExportedFunction("gx_reset"),
 	}
 
-	// Validate all exports are present.
 	for name, fn := range map[string]api.Function{
 		"gx_alloc":          t.gxAlloc,
 		"gx_free":           t.gxFree,
@@ -94,7 +89,6 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		}
 	}
 
-	// Allocate feed buffer.
 	results, err := t.gxAlloc.Call(ctx, uint64(feedBufSize))
 	if err != nil {
 		mod.Close(ctx)
@@ -107,7 +101,6 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 	}
 	t.feedLen = feedBufSize
 
-	// Initialize terminal.
 	results, err = t.gxInit.Call(ctx, uint64(cols), uint64(rows), uint64(scrollback))
 	if err != nil {
 		mod.Close(ctx)
@@ -121,12 +114,10 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 	return t, nil
 }
 
-// Close releases the runtime and compiled module.
 func (r *Runtime) Close(ctx context.Context) error {
 	return r.rt.Close(ctx)
 }
 
-// Terminal wraps a single WASM module instance with a virtual terminal.
 type Terminal struct {
 	mu  sync.Mutex
 	mod api.Module
@@ -147,8 +138,7 @@ type Terminal struct {
 	feedLen uint32
 }
 
-// Feed writes PTY output data into the terminal. Data larger than the feed
-// buffer is automatically chunked.
+// Data larger than the feed buffer is automatically chunked.
 func (t *Terminal) Feed(ctx context.Context, data []byte) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -173,7 +163,6 @@ func (t *Terminal) Feed(ctx context.Context, data []byte) error {
 	return nil
 }
 
-// Resize changes the terminal dimensions.
 func (t *Terminal) Resize(ctx context.Context, cols, rows uint32) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -188,7 +177,6 @@ func (t *Terminal) Resize(ctx context.Context, cols, rows uint32) error {
 	return nil
 }
 
-// Reset performs a full terminal reset.
 func (t *Terminal) Reset(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -203,7 +191,6 @@ func (t *Terminal) Reset(ctx context.Context) error {
 	return nil
 }
 
-// ScreenDump holds the result of a DumpScreen call.
 type ScreenDump struct {
 	VT          []byte
 	CursorRow   uint32
@@ -211,20 +198,16 @@ type ScreenDump struct {
 	IsAltScreen bool
 }
 
-// Dump format constants matching gx_dump_screen parameter.
 const (
 	DumpPlain  uint32 = 0 // Plain text, no escape sequences.
 	DumpVTFull uint32 = 1 // Full VT with all extras (for reattach).
 	DumpVTSafe uint32 = 2 // Safe VT — colors but no palette/mode corruption.
 )
 
-// DumpScreen serializes the terminal screen in the given format and
-// returns the result along with cursor position and alt screen state.
 func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Dump screen into internal WASM buffer.
 	results, err := t.gxDumpScreen.Call(ctx, uint64(format))
 	if err != nil {
 		return nil, fmt.Errorf("wasm: gx_dump_screen: %w", err)
@@ -234,14 +217,12 @@ func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, 
 		return nil, fmt.Errorf("wasm: gx_dump_screen returned %d", length)
 	}
 
-	// Get pointer to dump.
 	results, err = t.gxDumpPtr.Call(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: gx_dump_ptr: %w", err)
 	}
 	ptr := uint32(results[0])
 
-	// Read the VT bytes from WASM memory.
 	var vt []byte
 	if length > 0 {
 		buf, ok := t.mod.Memory().Read(ptr, uint32(length))
@@ -252,7 +233,7 @@ func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, 
 		copy(vt, buf)
 	}
 
-	// Get cursor position (packed: col | row<<16).
+	// Packed cursor: col | row<<16.
 	results, err = t.gxGetCursor.Call(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: gx_get_cursor_pos: %w", err)
@@ -261,7 +242,6 @@ func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, 
 	cursorCol := packed & 0xFFFF
 	cursorRow := packed >> 16
 
-	// Get alt screen state.
 	results, err = t.gxIsAltScr.Call(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: gx_is_alt_screen: %w", err)
@@ -276,7 +256,6 @@ func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, 
 	}, nil
 }
 
-// Close destroys the terminal and frees resources.
 func (t *Terminal) Close(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -6,7 +6,6 @@ import (
 	"io"
 )
 
-// Encoder writes binary-encoded fields to an io.Writer.
 type Encoder struct {
 	w   io.Writer
 	buf [8]byte
@@ -69,7 +68,6 @@ func (e *Encoder) WriteBytes(v []byte) error {
 	return err
 }
 
-// Decoder reads binary-encoded fields from an io.Reader.
 type Decoder struct {
 	r   io.Reader
 	buf [8]byte

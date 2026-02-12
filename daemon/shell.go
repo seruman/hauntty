@@ -7,23 +7,16 @@ import (
 	"strings"
 )
 
-// SetupShellEnv prepares the environment and command for shell integration.
-// It detects the shell from the command string, applies the appropriate
-// integration mechanism, and returns the modified command and environment.
-// The returned tempDir (if non-empty) must be cleaned up by the caller
-// after the child process exits.
+// The returned tempDir (if non-empty) must be cleaned up by the caller.
 func SetupShellEnv(command string, env []string, sessionName string) (cmd string, modifiedEnv []string, tempDir string, err error) {
 	cmd = command
 	modifiedEnv = make([]string, len(env))
 	copy(modifiedEnv, env)
 
-	// Set HAUNTTY_SESSION for the child.
 	modifiedEnv = setEnv(modifiedEnv, "HAUNTTY_SESSION", sessionName)
 
-	// Find GHOSTTY_RESOURCES_DIR from the environment.
 	resourcesDir := getEnv(modifiedEnv, "GHOSTTY_RESOURCES_DIR")
 	if resourcesDir == "" {
-		// No resources dir means no shell integration to inject.
 		return cmd, modifiedEnv, "", nil
 	}
 
@@ -40,11 +33,9 @@ func SetupShellEnv(command string, env []string, sessionName string) (cmd string
 	return cmd, modifiedEnv, tempDir, err
 }
 
-// detectShell returns "zsh", "bash", "fish", or "" from a command string.
 func detectShell(command string) string {
 	base := filepath.Base(command)
-	// Strip leading dash (login shell).
-	base = strings.TrimPrefix(base, "-")
+	base = strings.TrimPrefix(base, "-") // -zsh → zsh (login shell)
 	switch {
 	case base == "zsh" || strings.HasPrefix(base, "zsh "):
 		return "zsh"
@@ -56,8 +47,8 @@ func detectShell(command string) string {
 	return ""
 }
 
-// setupZsh creates a temporary ZDOTDIR with a .zshenv that sources
-// the Ghostty integration and then the user's real .zshenv.
+// Creates a temporary ZDOTDIR with a .zshenv that sources Ghostty
+// integration, then delegates to the user's real .zshenv.
 func setupZsh(command string, env []string, resourcesDir string) (string, []string, string, error) {
 	origZdotdir := getEnv(env, "ZDOTDIR")
 
@@ -66,7 +57,6 @@ func setupZsh(command string, env []string, resourcesDir string) (string, []stri
 		return command, env, "", fmt.Errorf("create zsh temp dir: %w", err)
 	}
 
-	// Determine the real ZDOTDIR for restoring and sourcing the user's .zshenv.
 	realZdotdir := origZdotdir
 	if realZdotdir == "" {
 		realZdotdir = os.Getenv("HOME")
@@ -75,17 +65,15 @@ func setupZsh(command string, env []string, resourcesDir string) (string, []stri
 	integrationScript := filepath.Join(resourcesDir, "shell-integration", "zsh", "ghostty-integration")
 
 	var zshenv strings.Builder
-	// Restore original ZDOTDIR so zsh looks in the right place for .zshrc etc.
+	// Restore original ZDOTDIR so zsh finds .zshrc in the right place.
 	if origZdotdir != "" {
 		fmt.Fprintf(&zshenv, "export ZDOTDIR=%q\n", origZdotdir)
 	} else {
 		zshenv.WriteString("unset ZDOTDIR\n")
 	}
 
-	// Source Ghostty shell integration.
 	fmt.Fprintf(&zshenv, "source %q\n", integrationScript)
 
-	// Source the user's real .zshenv if it exists.
 	userZshenv := filepath.Join(realZdotdir, ".zshenv")
 	fmt.Fprintf(&zshenv, "[[ -f %q ]] && source %q\n", userZshenv, userZshenv)
 
@@ -98,21 +86,17 @@ func setupZsh(command string, env []string, resourcesDir string) (string, []stri
 	return command, env, tmpDir, nil
 }
 
-// setupBash modifies the command to source Ghostty's bash integration.
 func setupBash(command string, env []string, resourcesDir string) (string, []string, error) {
 	integrationScript := filepath.Join(resourcesDir, "shell-integration", "bash", "ghostty.bash")
 	env = setEnv(env, "GHOSTTY_BASH_INJECT", "1")
 	env = setEnv(env, "ENV", integrationScript)
 
-	// For interactive shells, use --init-file with a process substitution
-	// is not possible since we exec directly. Instead, set BASH_ENV for
-	// non-interactive and use --rcfile for interactive.
+	// Can't use --init-file since we exec directly; BASH_ENV covers both.
 	env = setEnv(env, "BASH_ENV", integrationScript)
 
 	return command, env, nil
 }
 
-// setupFish prepends the Ghostty fish vendor config to XDG_DATA_DIRS.
 func setupFish(env []string, resourcesDir string) []string {
 	fishDir := filepath.Join(resourcesDir, "shell-integration", "fish")
 	existing := getEnv(env, "XDG_DATA_DIRS")
@@ -123,7 +107,6 @@ func setupFish(env []string, resourcesDir string) []string {
 	return env
 }
 
-// getEnv retrieves a value from an env slice of KEY=VALUE strings.
 func getEnv(env []string, key string) string {
 	prefix := key + "="
 	for _, e := range env {
@@ -134,7 +117,6 @@ func getEnv(env []string, key string) string {
 	return ""
 }
 
-// setEnv sets or replaces a KEY=VALUE pair in an env slice.
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	for i, e := range env {

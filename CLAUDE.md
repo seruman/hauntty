@@ -9,6 +9,7 @@
 - Be explicit about ownership of structs and resources, even with GC.
 - Be explicit about component responsibilities. MUST NOT mix responsibilities.
 - If test code needs to be injected into production code, rethink the design.
+- MUST NOT add comments that restate what the code already says. Comments are for non-obvious intent, workarounds, and subtle gotchas — not narration.
 
 ## Naming
 

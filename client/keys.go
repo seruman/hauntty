@@ -5,12 +5,9 @@ import (
 	"strings"
 )
 
-// ParseKeyNotation converts a key notation string like "ctrl+c" or "enter"
-// into the corresponding byte sequence.
 func ParseKeyNotation(notation string) ([]byte, error) {
 	notation = strings.TrimSpace(strings.ToLower(notation))
 
-	// Named keys.
 	switch notation {
 	case "enter", "return":
 		return []byte{0x0d}, nil
@@ -24,7 +21,6 @@ func ParseKeyNotation(notation string) ([]byte, error) {
 		return []byte{0x20}, nil
 	}
 
-	// ctrl+<key> combinations.
 	parts := strings.Split(notation, "+")
 	if len(parts) == 2 && parts[0] == "ctrl" {
 		key := parts[1]

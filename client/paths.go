@@ -17,18 +17,14 @@ func socketDir() string {
 	return filepath.Join(tmpdir, fmt.Sprintf("hauntty-%d", os.Getuid()))
 }
 
-// SocketPath returns the path to the daemon Unix socket.
 func SocketPath() string {
 	return filepath.Join(socketDir(), "hauntty.sock")
 }
 
-// PIDPath returns the path to the daemon PID file.
 func PIDPath() string {
 	return filepath.Join(socketDir(), "hauntty.pid")
 }
 
-// DaemonRunning checks if the daemon is running by reading the PID file
-// and verifying the process exists.
 func DaemonRunning() bool {
 	data, err := os.ReadFile(PIDPath())
 	if err != nil {

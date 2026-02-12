@@ -8,7 +8,6 @@ import (
 
 const ProtocolVersion uint8 = 1
 
-// Conn provides framed message reading and writing over an io.ReadWriter.
 type Conn struct {
 	rw io.ReadWriter
 }
@@ -17,13 +16,11 @@ func NewConn(rw io.ReadWriter) *Conn {
 	return &Conn{rw: rw}
 }
 
-// WriteMessage encodes a message with a length-prefixed frame:
-// [u32 message_length][u8 message_type][payload...]
+// Frame: [u32 length][u8 type][payload...]
 func (c *Conn) WriteMessage(msg Message) error {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
-	// Encode the payload (type byte + fields).
 	if err := enc.WriteU8(msg.Type()); err != nil {
 		return err
 	}
@@ -31,7 +28,6 @@ func (c *Conn) WriteMessage(msg Message) error {
 		return err
 	}
 
-	// Write length prefix + payload to the underlying writer.
 	frame := buf.Bytes()
 	lenEnc := NewEncoder(c.rw)
 	if err := lenEnc.WriteU32(uint32(len(frame))); err != nil {
@@ -41,7 +37,6 @@ func (c *Conn) WriteMessage(msg Message) error {
 	return err
 }
 
-// ReadMessage reads a length-prefixed frame and decodes the message.
 func (c *Conn) ReadMessage() (Message, error) {
 	dec := NewDecoder(c.rw)
 
@@ -53,7 +48,7 @@ func (c *Conn) ReadMessage() (Message, error) {
 		return nil, fmt.Errorf("empty message frame")
 	}
 
-	// Read the entire frame into a buffer to prevent over-reading.
+	// Read entire frame into buffer to prevent over-reading from the stream.
 	frame := make([]byte, length)
 	if _, err := io.ReadFull(c.rw, frame); err != nil {
 		return nil, err
@@ -75,8 +70,6 @@ func (c *Conn) ReadMessage() (Message, error) {
 	return msg, nil
 }
 
-// Handshake performs the client side of the version handshake.
-// It sends the proposed version and reads back the accepted version.
 func (c *Conn) Handshake(version uint8) (uint8, error) {
 	enc := NewEncoder(c.rw)
 	if err := enc.WriteU8(version); err != nil {
@@ -86,16 +79,12 @@ func (c *Conn) Handshake(version uint8) (uint8, error) {
 	return dec.ReadU8()
 }
 
-// AcceptHandshake performs the server side of the version handshake.
-// It reads the client's proposed version and returns it. The caller
-// should check the version and either write back an accepted version
-// or close the connection.
+// Caller must check the version and call AcceptVersion or close.
 func (c *Conn) AcceptHandshake() (uint8, error) {
 	dec := NewDecoder(c.rw)
 	return dec.ReadU8()
 }
 
-// AcceptVersion writes the accepted version back to the client.
 func (c *Conn) AcceptVersion(version uint8) error {
 	enc := NewEncoder(c.rw)
 	return enc.WriteU8(version)

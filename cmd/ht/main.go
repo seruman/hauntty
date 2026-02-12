@@ -230,8 +230,6 @@ func main() {
 	ctx.FatalIfErrorf(err)
 }
 
-// ensureDaemon starts the daemon if it is not already running and waits
-// for the socket to appear.
 func ensureDaemon() error {
 	if client.DaemonRunning() {
 		return nil
