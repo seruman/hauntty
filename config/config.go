@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -56,7 +57,11 @@ func Default() *Config {
 // ($XDG_CONFIG_HOME/hauntty/config.toml or ~/.config/hauntty/config.toml).
 // If the file does not exist, defaults are returned without error.
 func Load() (*Config, error) {
-	return LoadFrom(defaultPath())
+	path, err := defaultPath()
+	if err != nil {
+		return Default(), nil
+	}
+	return LoadFrom(path)
 }
 
 // LoadFrom reads the configuration from the given path.
@@ -94,10 +99,13 @@ func applyDefaults(cfg *Config) {
 }
 
 // defaultPath returns the default config file path.
-func defaultPath() string {
+func defaultPath() (string, error) {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, "hauntty", "config.toml")
+		return filepath.Join(dir, "hauntty", "config.toml"), nil
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "hauntty", "config.toml")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("config: determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "hauntty", "config.toml"), nil
 }

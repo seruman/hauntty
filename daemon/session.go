@@ -74,8 +74,12 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 
 	term, err := wasmRT.NewTerminal(ctx, uint32(cols), uint32(rows), scrollback)
 	if err != nil {
-		ptmx.Close()
-		cmd.Process.Kill()
+		if cerr := ptmx.Close(); cerr != nil {
+			slog.Warn("close pty on cleanup", "err", cerr)
+		}
+		if kerr := cmd.Process.Kill(); kerr != nil {
+			slog.Warn("kill process on cleanup", "err", kerr)
+		}
 		cmd.Wait()
 		if tempDir != "" {
 			os.RemoveAll(tempDir)
@@ -156,7 +160,9 @@ func (s *Session) readLoop(ctx context.Context) {
 
 	s.clientMu.Lock()
 	if s.client != nil {
-		s.client.WriteMessage(&protocol.Exited{ExitCode: s.exitCode})
+		if err := s.client.WriteMessage(&protocol.Exited{ExitCode: s.exitCode}); err != nil {
+			slog.Debug("write exited notification", "session", s.Name, "err", err)
+		}
 	}
 	s.clientMu.Unlock()
 }
@@ -236,7 +242,9 @@ func (s *Session) resize(cols, rows uint16) error {
 		return err
 	}
 	syscall.Kill(-int(s.PID), syscall.SIGWINCH)
-	s.term.Resize(context.Background(), uint32(cols), uint32(rows))
+	if rerr := s.term.Resize(context.Background(), uint32(cols), uint32(rows)); rerr != nil {
+		slog.Warn("wasm resize", "session", s.Name, "err", rerr)
+	}
 	return nil
 }
 

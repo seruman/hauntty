@@ -173,8 +173,8 @@ func (cmd *DumpCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	os.Stdout.Write(data)
-	return nil
+	_, err = os.Stdout.Write(data)
+	return err
 }
 
 type DetachCmd struct{}

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -71,7 +72,9 @@ func (s *Server) Listen() error {
 	}
 
 	// Remove stale socket if present.
-	os.Remove(s.socketPath)
+	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("remove stale socket", "path", s.socketPath, "err", err)
+	}
 
 	ln, err := net.Listen("unix", s.socketPath)
 	if err != nil {
@@ -156,7 +159,9 @@ func (s *Server) handleConn(netConn net.Conn) {
 		return
 	}
 	if clientVer != protocol.ProtocolVersion {
-		conn.AcceptVersion(0)
+		if err := conn.AcceptVersion(0); err != nil {
+			slog.Debug("reject handshake", "err", err)
+		}
 		return
 	}
 	if err := conn.AcceptVersion(protocol.ProtocolVersion); err != nil {
@@ -236,7 +241,9 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT)
 		if err != nil {
 			s.mu.Unlock()
-			conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()})
+			if werr := conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()}); werr != nil {
+				slog.Debug("write error response", "err", werr)
+			}
 			return nil, err
 		}
 		s.sessions[name] = sess
@@ -270,7 +277,9 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 	}
 
 	if err := sess.attach(conn, closeConn, msg.Cols, msg.Rows); err != nil {
-		conn.WriteMessage(&protocol.Error{Code: 2, Message: err.Error()})
+		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: err.Error()}); werr != nil {
+			slog.Debug("write error response", "err", werr)
+		}
 		return nil, err
 	}
 
@@ -303,7 +312,9 @@ func (s *Server) handleList(conn *protocol.Conn) {
 		sessions = append(sessions, protocol.Session{Name: name, State: "dead"})
 	}
 
-	conn.WriteMessage(&protocol.Sessions{Sessions: sessions})
+	if err := conn.WriteMessage(&protocol.Sessions{Sessions: sessions}); err != nil {
+		slog.Debug("write sessions response", "err", err)
+	}
 }
 
 func (s *Server) handleKill(conn *protocol.Conn, msg *protocol.Kill) {
@@ -312,12 +323,16 @@ func (s *Server) handleKill(conn *protocol.Conn, msg *protocol.Kill) {
 	s.mu.RUnlock()
 
 	if !ok {
-		conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"})
+		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+			slog.Debug("write error response", "err", err)
+		}
 		return
 	}
 
 	sess.kill()
-	conn.WriteMessage(&protocol.OK{SessionName: msg.Name})
+	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.Name}); err != nil {
+		slog.Debug("write ok response", "err", err)
+	}
 }
 
 func (s *Server) handleSend(conn *protocol.Conn, msg *protocol.Send) {
@@ -326,15 +341,21 @@ func (s *Server) handleSend(conn *protocol.Conn, msg *protocol.Send) {
 	s.mu.RUnlock()
 
 	if !ok {
-		conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"})
+		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+			slog.Debug("write error response", "err", err)
+		}
 		return
 	}
 
 	if err := sess.sendInput(msg.Data); err != nil {
-		conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()})
+		if werr := conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()}); werr != nil {
+			slog.Debug("write error response", "err", werr)
+		}
 		return
 	}
-	conn.WriteMessage(&protocol.OK{SessionName: msg.Name})
+	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.Name}); err != nil {
+		slog.Debug("write ok response", "err", err)
+	}
 }
 
 func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
@@ -343,7 +364,9 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	s.mu.RUnlock()
 
 	if !ok {
-		conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"})
+		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+			slog.Debug("write error response", "err", err)
+		}
 		return
 	}
 
@@ -358,11 +381,15 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 
 	dump, err := sess.dumpScreen(s.ctx, wasmFmt)
 	if err != nil {
-		conn.WriteMessage(&protocol.Error{Code: 5, Message: err.Error()})
+		if werr := conn.WriteMessage(&protocol.Error{Code: 5, Message: err.Error()}); werr != nil {
+			slog.Debug("write error response", "err", werr)
+		}
 		return
 	}
 
-	conn.WriteMessage(&protocol.DumpResponse{Data: dump.VT})
+	if err := conn.WriteMessage(&protocol.DumpResponse{Data: dump.VT}); err != nil {
+		slog.Debug("write dump response", "err", err)
+	}
 }
 
 // Shutdown gracefully stops the daemon, killing all sessions and cleaning up.
@@ -388,8 +415,12 @@ func (s *Server) Shutdown() {
 
 	s.wasmRT.Close(context.Background())
 
-	os.Remove(s.socketPath)
-	os.Remove(s.pidPath)
+	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("remove socket", "path", s.socketPath, "err", err)
+	}
+	if err := os.Remove(s.pidPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("remove pid file", "path", s.pidPath, "err", err)
+	}
 }
 
 func (s *Server) writePID() error {

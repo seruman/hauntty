@@ -85,13 +85,17 @@ func (c *Client) RunAttach(name string, command string) error {
 	// Save host terminal DEC private mode state (XTSAVE) and push kitty
 	// keyboard level so we can restore exactly on detach, rather than
 	// blindly resetting modes the host shell may have had enabled.
-	os.Stdout.Write([]byte(
+	if _, err := os.Stdout.Write([]byte(
 		"\x1b[?1000;1002;1003;1006;2004;1004;1049;2048;2026;25s" +
-			"\x1b[>0u"))
+			"\x1b[>0u")); err != nil {
+		return fmt.Errorf("save terminal state: %w", err)
+	}
 
 	// Clear screen before rendering session content so it doesn't mix
 	// with whatever was previously on the host terminal.
-	os.Stdout.Write([]byte("\x1b[2J\x1b[H"))
+	if _, err := os.Stdout.Write([]byte("\x1b[2J\x1b[H")); err != nil {
+		return fmt.Errorf("clear screen: %w", err)
+	}
 
 	// Check for initial STATE message (screen restore on reattach).
 	// We peek at the first message; if it's STATE, write the screen dump.
@@ -101,7 +105,9 @@ func (c *Client) RunAttach(name string, command string) error {
 		return fmt.Errorf("read initial message: %w", err)
 	}
 	if state, isState := firstMsg.(*protocol.State); isState {
-		os.Stdout.Write(state.ScreenDump)
+		if _, err := os.Stdout.Write(state.ScreenDump); err != nil {
+			return fmt.Errorf("write state dump: %w", err)
+		}
 		firstMsg = nil
 	}
 
@@ -133,8 +139,11 @@ func (c *Client) RunAttach(name string, command string) error {
 					continue
 				}
 				mu.Lock()
-				c.WriteMessage(&protocol.Resize{Cols: uint16(w), Rows: uint16(h)})
+				werr := c.WriteMessage(&protocol.Resize{Cols: uint16(w), Rows: uint16(h)})
 				mu.Unlock()
+				if werr != nil {
+					return
+				}
 			case <-done:
 				return
 			}
@@ -153,17 +162,23 @@ func (c *Client) RunAttach(name string, command string) error {
 				if i := detachIndex(data); i >= 0 {
 					if i > 0 {
 						mu.Lock()
-						c.WriteMessage(&protocol.Input{Data: data[:i]})
+						werr := c.WriteMessage(&protocol.Input{Data: data[:i]})
 						mu.Unlock()
+						if werr != nil {
+							return
+						}
 					}
 					mu.Lock()
-					c.Detach()
+					_ = c.Detach()
 					mu.Unlock()
 					return
 				}
 				mu.Lock()
-				c.WriteMessage(&protocol.Input{Data: data})
+				werr := c.WriteMessage(&protocol.Input{Data: data})
 				mu.Unlock()
+				if werr != nil {
+					return
+				}
 			}
 			if err != nil {
 				return

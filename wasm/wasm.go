@@ -282,10 +282,14 @@ func (t *Terminal) Close(ctx context.Context) error {
 	defer t.mu.Unlock()
 
 	if t.gxDeinit != nil {
-		t.gxDeinit.Call(ctx)
+		if _, err := t.gxDeinit.Call(ctx); err != nil {
+			slog.Debug("wasm gx_deinit", "err", err)
+		}
 	}
 	if t.feedPtr != 0 {
-		t.gxFree.Call(ctx, uint64(t.feedPtr), uint64(t.feedLen))
+		if _, err := t.gxFree.Call(ctx, uint64(t.feedPtr), uint64(t.feedLen)); err != nil {
+			slog.Debug("wasm gx_free", "err", err)
+		}
 		t.feedPtr = 0
 	}
 	return t.mod.Close(ctx)
