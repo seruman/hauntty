@@ -62,11 +62,11 @@ func (c *Client) Attach(name string, cols, rows uint16, command string, env []st
 		ScrollbackLines: scrollback,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("send attach: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read attach response: %w", err)
 	}
 	switch m := msg.(type) {
 	case *protocol.OK:
@@ -81,11 +81,11 @@ func (c *Client) Attach(name string, cols, rows uint16, command string, env []st
 // List sends a LIST message and returns the sessions.
 func (c *Client) List() (*protocol.Sessions, error) {
 	if err := c.conn.WriteMessage(&protocol.List{}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("send list: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read list response: %w", err)
 	}
 	switch m := msg.(type) {
 	case *protocol.Sessions:
@@ -100,11 +100,11 @@ func (c *Client) List() (*protocol.Sessions, error) {
 // Kill sends a KILL message for the named session.
 func (c *Client) Kill(name string) error {
 	if err := c.conn.WriteMessage(&protocol.Kill{Name: name}); err != nil {
-		return err
+		return fmt.Errorf("send kill: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
 	if err != nil {
-		return err
+		return fmt.Errorf("read kill response: %w", err)
 	}
 	switch m := msg.(type) {
 	case *protocol.OK:
@@ -119,11 +119,11 @@ func (c *Client) Kill(name string) error {
 // Send sends input data to a session without attaching.
 func (c *Client) Send(name string, data []byte) error {
 	if err := c.conn.WriteMessage(&protocol.Send{Name: name, Data: data}); err != nil {
-		return err
+		return fmt.Errorf("send input: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
 	if err != nil {
-		return err
+		return fmt.Errorf("read send response: %w", err)
 	}
 	switch m := msg.(type) {
 	case *protocol.OK:
@@ -138,11 +138,11 @@ func (c *Client) Send(name string, data []byte) error {
 // Dump requests a session dump in the given format and returns the data.
 func (c *Client) Dump(name string, format uint8) ([]byte, error) {
 	if err := c.conn.WriteMessage(&protocol.Dump{Name: name, Format: format}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("send dump: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read dump response: %w", err)
 	}
 	switch m := msg.(type) {
 	case *protocol.DumpResponse:

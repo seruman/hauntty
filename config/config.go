@@ -74,7 +74,7 @@ func LoadFrom(path string) (*Config, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return cfg, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
 	applyDefaults(cfg)
