@@ -34,6 +34,15 @@ type AttachCmd struct {
 }
 
 func (cmd *AttachCmd) Run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	dk, err := client.ParseDetachKey(cfg.Client.DetachKeybind)
+	if err != nil {
+		return fmt.Errorf("invalid detach_keybind %q: %w", cfg.Client.DetachKeybind, err)
+	}
+
 	if err := ensureDaemon(); err != nil {
 		return err
 	}
@@ -53,7 +62,7 @@ func (cmd *AttachCmd) Run() error {
 		command = strings.Join(args, " ")
 	}
 
-	return c.RunAttach(cmd.Name, command)
+	return c.RunAttach(cmd.Name, command, dk)
 }
 
 type ListCmd struct {

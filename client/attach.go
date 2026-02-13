@@ -42,18 +42,14 @@ func collectEnv() []string {
 	return env
 }
 
-// detachSeq is the CSI u encoding of Ctrl-] (\x1b[93;5u).
-var detachSeq = []byte("\x1b[93;5u")
-
-// Checks both raw Ctrl-] (0x1d) and kitty keyboard CSI u (\x1b[93;5u).
-func detachIndex(data []byte) int {
-	if i := bytes.IndexByte(data, 0x1d); i >= 0 {
+func findDetach(data []byte, dk DetachKey) int {
+	if i := bytes.IndexByte(data, dk.RawByte); i >= 0 {
 		return i
 	}
-	return bytes.Index(data, detachSeq)
+	return bytes.Index(data, dk.CSISeq)
 }
 
-func (c *Client) RunAttach(name string, command string) error {
+func (c *Client) RunAttach(name string, command string, dk DetachKey) error {
 	fd := int(os.Stdin.Fd())
 
 	cols, rows, err := term.GetSize(fd)
@@ -142,7 +138,7 @@ func (c *Client) RunAttach(name string, command string) error {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
 				data := buf[:n]
-				if i := detachIndex(data); i >= 0 {
+				if i := findDetach(data, dk); i >= 0 {
 					if i > 0 {
 						mu.Lock()
 						werr := c.WriteMessage(&protocol.Input{Data: data[:i]})

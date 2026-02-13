@@ -40,7 +40,7 @@ func Default() *Config {
 			StatePersistenceInterval: 30,
 		},
 		Client: ClientConfig{
-			DetachKeybind: `ctrl+\`,
+			DetachKeybind: "ctrl+]",
 		},
 		Session: SessionConfig{
 			ForwardEnv: []string{"GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},

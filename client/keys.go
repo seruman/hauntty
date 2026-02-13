@@ -109,3 +109,39 @@ func parseKeyName(name string) (uint32, error) {
 
 	return 0, fmt.Errorf("unknown key: %q", name)
 }
+
+// DetachKey holds the byte patterns used to detect the detach keybind in stdin.
+type DetachKey struct {
+	RawByte byte
+	CSISeq  []byte
+}
+
+func ParseDetachKey(notation string) (DetachKey, error) {
+	ki, err := ParseKeyNotation(notation)
+	if err != nil {
+		return DetachKey{}, err
+	}
+	if ki.Mods&wasm.ModCtrl == 0 {
+		return DetachKey{}, fmt.Errorf("detach keybind must include ctrl modifier")
+	}
+	if ki.Code < 0x20 || ki.Code > 0x7e {
+		return DetachKey{}, fmt.Errorf("detach keybind must be ctrl+<printable key>")
+	}
+	kittyMods := uint32(1)
+	if ki.Mods&wasm.ModShift != 0 {
+		kittyMods += 1
+	}
+	if ki.Mods&wasm.ModCtrl != 0 {
+		kittyMods += 4
+	}
+	if ki.Mods&wasm.ModAlt != 0 {
+		kittyMods += 2
+	}
+	if ki.Mods&wasm.ModSuper != 0 {
+		kittyMods += 8
+	}
+	return DetachKey{
+		RawByte: byte(ki.Code & 0x1f),
+		CSISeq:  fmt.Appendf(nil, "\x1b[%d;%du", ki.Code, kittyMods),
+	}, nil
+}
