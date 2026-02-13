@@ -102,6 +102,13 @@ func (c *Client) RunAttach(name string, command string, dk DetachKey) error {
 	}
 	defer term.Restore(fd, oldState)
 
+	// Discard stale terminal responses (e.g. kitty keyboard query
+	// replies) that accumulated in stdin while connecting. These
+	// arrive because the inner shell's queries pass through to
+	// the host terminal, whose responses sit in the kernel buffer
+	// until we start reading.
+	drainStdin(fd, 10*time.Millisecond)
+
 	sigwinch := make(chan os.Signal, 1)
 	signal.Notify(sigwinch, unix.SIGWINCH)
 	defer signal.Stop(sigwinch)
@@ -194,17 +201,27 @@ func (c *Client) RunAttach(name string, command string, dk DetachKey) error {
 		if err != nil {
 			close(done)
 			if err == io.EOF || isConnClosed(err) {
-				// Disable event-generating modes while still in raw mode
-				// so the terminal stops sending unsolicited input.
+				// All restore work happens in raw mode so we can
+				// drain terminal responses before the host shell
+				// sees them.
+
+				// Disable event-generating modes.
 				os.Stdout.Write([]byte("\x1b[?1004;1000;1002;1003;1006;2048l"))
 				drainStdin(fd, 20*time.Millisecond)
-				term.Restore(fd, oldState)
-				// Restore host terminal DEC private modes (XTRESTORE) and
-				// pop kitty keyboard level to pre-attach state.
+
+				// Restore host terminal state: XTRESTORE (DEC private
+				// modes), pop kitty keyboard, reset scroll region,
+				// reset SGR, clear screen.
 				os.Stdout.Write([]byte(
 					"\x1b[?1000;1002;1003;1006;2004;1004;1049;2048;2026;25r" +
 						"\x1b[<u" +
+						"\x1b[r" +
 						"\x1b[0m\x1b[2J\x1b[H"))
+
+				// Drain responses from restored modes (focus events,
+				// color reports, geometry replies, etc.).
+				drainStdin(fd, 20*time.Millisecond)
+				term.Restore(fd, oldState)
 				fmt.Fprintf(os.Stderr, "[hauntty] detached\n")
 				return nil
 			}
@@ -219,10 +236,9 @@ func (c *Client) RunAttach(name string, command string, dk DetachKey) error {
 	}
 }
 
-// drainStdin reads and discards any pending bytes on fd for the given duration.
-// Uses unix.Select for timed polling because os.Stdin.Read has no timeout
-// mechanism on tty fds, SetReadDeadline only works on sockets and pipes.
-// Must be called while the terminal is in raw mode.
+// drainStdin reads and discards any pending bytes on fd for the given
+// duration. Uses unix.Select for timed polling because os.Stdin.Read
+// has no timeout mechanism on tty fds. Must be called in raw mode.
 func drainStdin(fd int, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	buf := make([]byte, 256)
