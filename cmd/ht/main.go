@@ -14,6 +14,7 @@ import (
 	"github.com/selman/hauntty/client"
 	"github.com/selman/hauntty/config"
 	"github.com/selman/hauntty/daemon"
+	"github.com/selman/hauntty/protocol"
 )
 
 type CLI struct {
@@ -162,15 +163,19 @@ func (cmd *SendCmd) Run() error {
 type DumpCmd struct {
 	Name   string `arg:"" help:"Session name."`
 	Format string `enum:"plain,vt,html" default:"plain" help:"Output format (plain, vt, html)."`
+	Join   bool   `short:"J" help:"Join soft-wrapped lines."`
 }
 
 func (cmd *DumpCmd) Run() error {
 	var format uint8
 	switch cmd.Format {
 	case "vt":
-		format = 1
+		format = protocol.DumpVT
 	case "html":
-		format = 2
+		format = protocol.DumpHTML
+	}
+	if cmd.Join {
+		format |= protocol.DumpFlagUnwrap
 	}
 
 	c, err := client.Connect()

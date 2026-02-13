@@ -139,6 +139,13 @@ export fn gx_reset() callconv(.c) i32 {
 // State extraction — dump screen in plain or VT format
 // ---------------------------------------------------------------------------
 
+// Dump format constants — bits 0-3 are format, bit 4 is unwrap flag.
+const fmt_plain = 0;
+const fmt_vt_full = 1;
+const fmt_vt_safe = 2;
+const format_mask: u32 = 0x0F;
+const flag_unwrap: u32 = 0x10;
+
 fn dumpFree() void {
     if (g_dump) |*d| {
         d.deinit();
@@ -146,31 +153,38 @@ fn dumpFree() void {
     }
 }
 
-/// Dump the screen. format: 0=plain, 1=vt (for reattach), 2=vt-safe (for display).
-export fn gx_dump_screen(format: u32) callconv(.c) i32 {
+/// Dump the screen. format_flags: bits 0-3 = format (0=plain, 1=vt-full, 2=vt-safe), bit 4 = unwrap.
+export fn gx_dump_screen(format_flags: u32) callconv(.c) i32 {
     const t = &(g_terminal orelse return -1);
+
+    const format = format_flags & format_mask;
+    const unwrap = (format_flags & flag_unwrap) != 0;
 
     dumpFree();
 
     g_dump = .init(allocator);
 
     switch (format) {
-        0 => {
+        fmt_plain => {
             // Plain text — no escape sequences.
             const fmt: TerminalFormatter = .init(t, .{
                 .emit = .plain,
                 .palette = &t.colors.palette.current,
+                .unwrap = unwrap,
             });
             g_dump.?.writer.print("{f}", .{fmt}) catch {
                 dumpFree();
                 return -1;
             };
         },
-        1 => {
+        fmt_vt_full => {
             // VT for reattach state restoration.
             // palette=false: OSC 4 palette sequences override host terminal colors.
             // tabstops=false: tabstop restoration moves cursor after CUP, corrupting position.
-            var fmt: TerminalFormatter = .init(t, .vt);
+            var fmt: TerminalFormatter = .init(t, .{
+                .emit = .vt,
+                .unwrap = unwrap,
+            });
             fmt.content = .{ .selection = null };
             fmt.extra = .{
                 .palette = false,
@@ -186,7 +200,7 @@ export fn gx_dump_screen(format: u32) callconv(.c) i32 {
                 return -1;
             };
         },
-        2 => {
+        fmt_vt_safe => {
             // Safe VT — colors preserved but no palette/mode changes that
             // would corrupt the host terminal. Ends with SGR reset.
             const fmt: TerminalFormatter = .{
@@ -194,6 +208,7 @@ export fn gx_dump_screen(format: u32) callconv(.c) i32 {
                 .opts = .{
                     .emit = .vt,
                     .palette = &t.colors.palette.current,
+                    .unwrap = unwrap,
                 },
                 .content = .{ .selection = null },
                 .extra = .none,

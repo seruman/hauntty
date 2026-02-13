@@ -188,9 +188,11 @@ type ScreenDump struct {
 }
 
 const (
-	DumpPlain  uint32 = 0 // Plain text, no escape sequences.
-	DumpVTFull uint32 = 1 // Full VT with all extras (for reattach).
-	DumpVTSafe uint32 = 2 // Safe VT — colors but no palette/mode corruption.
+	DumpPlain      uint32 = 0    // Plain text, no escape sequences.
+	DumpVTFull     uint32 = 1    // Full VT with all extras (for reattach).
+	DumpVTSafe     uint32 = 2    // Safe VT — colors but no palette/mode corruption.
+	DumpFlagUnwrap uint32 = 0x10 // Bit 4: join soft-wrapped lines.
+	DumpFormatMask uint32 = 0x0F // Bits 0-3: format selector.
 )
 
 func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, error) {

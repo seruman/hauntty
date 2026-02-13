@@ -127,6 +127,28 @@ func TestMultipleTerminals(t *testing.T) {
 	assert.DeepEqual(t, dump2.VT, []byte("terminal two\x1b[0m\x1b[1;13H"))
 }
 
+func TestDumpUnwrap(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.NewRuntime(ctx)
+	assert.NilError(t, err)
+	defer rt.Close(ctx)
+
+	// 20-col terminal: 30 chars will soft-wrap onto two lines.
+	term := newTerminal(t, ctx, rt, 20, 24, 1000)
+	defer term.Close(ctx)
+
+	err = term.Feed(ctx, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
+	assert.NilError(t, err)
+
+	wrapped, err := term.DumpScreen(ctx, wasm.DumpPlain)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, wrapped.VT, []byte("aaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbb"))
+
+	unwrapped, err := term.DumpScreen(ctx, wasm.DumpPlain|wasm.DumpFlagUnwrap)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, unwrapped.VT, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
+}
+
 func TestReInit(t *testing.T) {
 	ctx := context.Background()
 	rt, err := wasm.NewRuntime(ctx)

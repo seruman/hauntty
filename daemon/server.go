@@ -382,14 +382,16 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 		return
 	}
 
-	// Map protocol format (0=plain, 1=vt, 2=html) to WASM dump format.
+	// Map protocol format to WASM format, preserving flag bits.
+	flags := uint32(msg.Format) & ^wasm.DumpFormatMask
 	var wasmFmt uint32
-	switch msg.Format {
-	case 1:
-		wasmFmt = wasm.DumpVTSafe // VT with SGR reset, no palette/mode corruption.
+	switch msg.Format & protocol.DumpFormatMask {
+	case protocol.DumpVT:
+		wasmFmt = wasm.DumpVTSafe
 	default:
 		wasmFmt = wasm.DumpPlain
 	}
+	wasmFmt |= flags
 
 	dump, err := sess.dumpScreen(s.ctx, wasmFmt)
 	if err != nil {
