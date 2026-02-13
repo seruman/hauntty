@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
 	"github.com/selman/hauntty/client"
 	"github.com/selman/hauntty/config"
@@ -25,6 +26,7 @@ type CLI struct {
 	Dump   DumpCmd   `cmd:"" help:"Dump session contents."`
 	Detach DetachCmd `cmd:"" help:"Detach from current session."`
 	Prune  PruneCmd  `cmd:"" help:"Delete dead session state files."`
+	Config ConfigCmd `cmd:"" help:"Print effective configuration."`
 	Daemon DaemonCmd `cmd:"" help:"Start daemon in foreground."`
 }
 
@@ -229,6 +231,16 @@ func (cmd *PruneCmd) Run() error {
 		fmt.Printf("pruned %d dead session(s)\n", count)
 	}
 	return nil
+}
+
+type ConfigCmd struct{}
+
+func (cmd *ConfigCmd) Run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return toml.NewEncoder(os.Stdout).Encode(cfg)
 }
 
 type DaemonCmd struct {
