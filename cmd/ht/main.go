@@ -120,40 +120,12 @@ func (cmd *KillCmd) Run() error {
 
 type SendCmd struct {
 	Name string   `arg:"" help:"Session name."`
-	Args []string `arg:"" passthrough:"" help:"Input text and --keys interleaved."`
-}
-
-// sendItem is either raw text bytes or a parsed key event.
-type sendItem struct {
-	text []byte
-	key  *client.KeyInput
+	Text []string `arg:"" optional:"" help:"Text to send."`
+	Key  []string `short:"k" name:"key" help:"Key notation (repeatable)." sep:"none"`
 }
 
 func (cmd *SendCmd) Run() error {
-	args := cmd.Args
-	// Strip leading "--" that kong passes through.
-	if len(args) > 0 && args[0] == "--" {
-		args = args[1:]
-	}
-
-	var items []sendItem
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--keys" {
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--keys requires a value")
-			}
-			ki, err := client.ParseKeyNotation(args[i])
-			if err != nil {
-				return err
-			}
-			items = append(items, sendItem{key: &ki})
-		} else {
-			items = append(items, sendItem{text: []byte(args[i])})
-		}
-	}
-
-	if len(items) == 0 {
+	if len(cmd.Text) == 0 && len(cmd.Key) == 0 {
 		return fmt.Errorf("send requires input")
 	}
 
@@ -163,15 +135,18 @@ func (cmd *SendCmd) Run() error {
 	}
 	defer c.Close()
 
-	for _, item := range items {
-		if item.key != nil {
-			if err := c.SendKey(cmd.Name, item.key.Code, item.key.Mods); err != nil {
-				return err
-			}
-		} else {
-			if err := c.Send(cmd.Name, item.text); err != nil {
-				return err
-			}
+	for _, t := range cmd.Text {
+		if err := c.Send(cmd.Name, []byte(t)); err != nil {
+			return err
+		}
+	}
+	for _, k := range cmd.Key {
+		ki, err := client.ParseKeyNotation(k)
+		if err != nil {
+			return err
+		}
+		if err := c.SendKey(cmd.Name, ki.Code, ki.Mods); err != nil {
+			return err
 		}
 	}
 	return nil
