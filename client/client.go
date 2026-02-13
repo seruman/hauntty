@@ -126,6 +126,24 @@ func (c *Client) Send(name string, data []byte) error {
 	}
 }
 
+func (c *Client) SendKey(name string, keyCode, mods uint32) error {
+	if err := c.conn.WriteMessage(&protocol.SendKey{Name: name, KeyCode: keyCode, Mods: mods}); err != nil {
+		return fmt.Errorf("send key: %w", err)
+	}
+	msg, err := c.conn.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("read send key response: %w", err)
+	}
+	switch m := msg.(type) {
+	case *protocol.OK:
+		return nil
+	case *protocol.Error:
+		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+	default:
+		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+	}
+}
+
 func (c *Client) Dump(name string, format uint8) ([]byte, error) {
 	if err := c.conn.WriteMessage(&protocol.Dump{Name: name, Format: format}); err != nil {
 		return nil, fmt.Errorf("send dump: %w", err)

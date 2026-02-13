@@ -203,6 +203,8 @@ func (s *Server) handleConn(netConn net.Conn) {
 			s.handleKill(conn, m)
 		case *protocol.Send:
 			s.handleSend(conn, m)
+		case *protocol.SendKey:
+			s.handleSendKey(conn, m)
 		case *protocol.Dump:
 			s.handleDump(conn, m)
 		case *protocol.Prune:
@@ -365,6 +367,40 @@ func (s *Server) handleSend(conn *protocol.Conn, msg *protocol.Send) {
 		}
 		return
 	}
+	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.Name}); err != nil {
+		slog.Debug("write ok response", "err", err)
+	}
+}
+
+func (s *Server) handleSendKey(conn *protocol.Conn, msg *protocol.SendKey) {
+	s.mu.RLock()
+	sess, ok := s.sessions[msg.Name]
+	s.mu.RUnlock()
+
+	if !ok {
+		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+			slog.Debug("write error response", "err", err)
+		}
+		return
+	}
+
+	data, err := sess.term.EncodeKey(s.ctx, msg.KeyCode, msg.Mods)
+	if err != nil {
+		if werr := conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()}); werr != nil {
+			slog.Debug("write error response", "err", werr)
+		}
+		return
+	}
+
+	if len(data) > 0 {
+		if err := sess.sendInput(data); err != nil {
+			if werr := conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()}); werr != nil {
+				slog.Debug("write error response", "err", werr)
+			}
+			return
+		}
+	}
+
 	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.Name}); err != nil {
 		slog.Debug("write ok response", "err", err)
 	}

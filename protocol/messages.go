@@ -2,15 +2,16 @@ package protocol
 
 const (
 	// Client → Daemon
-	TypeAttach uint8 = 0x01
-	TypeInput  uint8 = 0x02
-	TypeResize uint8 = 0x03
-	TypeDetach uint8 = 0x04
-	TypeList   uint8 = 0x05
-	TypeKill   uint8 = 0x06
-	TypeSend   uint8 = 0x07
-	TypeDump   uint8 = 0x08
-	TypePrune  uint8 = 0x09
+	TypeAttach  uint8 = 0x01
+	TypeInput   uint8 = 0x02
+	TypeResize  uint8 = 0x03
+	TypeDetach  uint8 = 0x04
+	TypeList    uint8 = 0x05
+	TypeKill    uint8 = 0x06
+	TypeSend    uint8 = 0x07
+	TypeDump    uint8 = 0x08
+	TypePrune   uint8 = 0x09
+	TypeSendKey uint8 = 0x0A
 
 	// Daemon → Client
 	TypeOK            uint8 = 0x80
@@ -200,6 +201,36 @@ func (m *Send) decode(d *Decoder) error {
 		return err
 	}
 	m.Data, err = d.ReadBytes()
+	return err
+}
+
+type SendKey struct {
+	Name    string
+	KeyCode uint32
+	Mods    uint32
+}
+
+func (m *SendKey) Type() uint8 { return TypeSendKey }
+
+func (m *SendKey) encode(e *Encoder) error {
+	if err := e.WriteString(m.Name); err != nil {
+		return err
+	}
+	if err := e.WriteU32(m.KeyCode); err != nil {
+		return err
+	}
+	return e.WriteU32(m.Mods)
+}
+
+func (m *SendKey) decode(d *Decoder) error {
+	var err error
+	if m.Name, err = d.ReadString(); err != nil {
+		return err
+	}
+	if m.KeyCode, err = d.ReadU32(); err != nil {
+		return err
+	}
+	m.Mods, err = d.ReadU32()
 	return err
 }
 

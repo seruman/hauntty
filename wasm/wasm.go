@@ -73,6 +73,7 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		gxDumpPtr:    mod.ExportedFunction("gx_dump_ptr"),
 		gxGetCursor:  mod.ExportedFunction("gx_get_cursor_pos"),
 		gxIsAltScr:   mod.ExportedFunction("gx_is_alt_screen"),
+		gxEncodeKey:  mod.ExportedFunction("gx_encode_key"),
 	}
 
 	for name, fn := range map[string]api.Function{
@@ -86,6 +87,7 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		"gx_dump_ptr":       t.gxDumpPtr,
 		"gx_get_cursor_pos": t.gxGetCursor,
 		"gx_is_alt_screen":  t.gxIsAltScr,
+		"gx_encode_key":     t.gxEncodeKey,
 	} {
 		if fn == nil {
 			mod.Close(ctx)
@@ -136,6 +138,7 @@ type Terminal struct {
 	gxDumpPtr    api.Function
 	gxGetCursor  api.Function
 	gxIsAltScr   api.Function
+	gxEncodeKey  api.Function
 
 	feedPtr uint32
 	feedLen uint32
@@ -196,6 +199,45 @@ const (
 	DumpFormatMask uint32 = 0x0F // Bits 0-3: format selector.
 )
 
+// Key codes for gx_encode_key. ASCII printable range (0x20-0x7E)
+// maps directly. Named keys use 0x100+.
+const (
+	KeyEnter     uint32 = 0x100
+	KeyEscape    uint32 = 0x101
+	KeyTab       uint32 = 0x102
+	KeyBackspace uint32 = 0x103
+	KeyUp        uint32 = 0x110
+	KeyDown      uint32 = 0x111
+	KeyLeft      uint32 = 0x112
+	KeyRight     uint32 = 0x113
+	KeyHome      uint32 = 0x120
+	KeyEnd       uint32 = 0x121
+	KeyPageUp    uint32 = 0x122
+	KeyPageDown  uint32 = 0x123
+	KeyInsert    uint32 = 0x124
+	KeyDelete    uint32 = 0x125
+	KeyF1        uint32 = 0x130
+	KeyF2        uint32 = 0x131
+	KeyF3        uint32 = 0x132
+	KeyF4        uint32 = 0x133
+	KeyF5        uint32 = 0x134
+	KeyF6        uint32 = 0x135
+	KeyF7        uint32 = 0x136
+	KeyF8        uint32 = 0x137
+	KeyF9        uint32 = 0x138
+	KeyF10       uint32 = 0x139
+	KeyF11       uint32 = 0x13A
+	KeyF12       uint32 = 0x13B
+)
+
+// Modifier bitmask for gx_encode_key, matching Ghostty's KeyMods layout.
+const (
+	ModShift uint32 = 0x01
+	ModCtrl  uint32 = 0x02
+	ModAlt   uint32 = 0x04
+	ModSuper uint32 = 0x08
+)
+
 func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -246,6 +288,37 @@ func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, 
 		CursorCol:   cursorCol,
 		IsAltScreen: isAlt,
 	}, nil
+}
+
+func (t *Terminal) EncodeKey(ctx context.Context, keyCode, mods uint32) ([]byte, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	results, err := t.gxEncodeKey.Call(ctx, uint64(keyCode), uint64(mods))
+	if err != nil {
+		return nil, fmt.Errorf("wasm: gx_encode_key: %w", err)
+	}
+	length := int32(results[0])
+	if length < 0 {
+		return nil, fmt.Errorf("wasm: gx_encode_key returned %d", length)
+	}
+	if length == 0 {
+		return nil, nil
+	}
+
+	results, err = t.gxDumpPtr.Call(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("wasm: gx_dump_ptr: %w", err)
+	}
+	ptr := uint32(results[0])
+
+	buf, ok := t.mod.Memory().Read(ptr, uint32(length))
+	if !ok {
+		return nil, fmt.Errorf("wasm: reading encode buffer failed")
+	}
+	out := make([]byte, len(buf))
+	copy(out, buf)
+	return out, nil
 }
 
 func (t *Terminal) Close(ctx context.Context) error {

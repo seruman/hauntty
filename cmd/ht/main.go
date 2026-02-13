@@ -123,6 +123,12 @@ type SendCmd struct {
 	Args []string `arg:"" passthrough:"" help:"Input text and --keys interleaved."`
 }
 
+// sendItem is either raw text bytes or a parsed key event.
+type sendItem struct {
+	text []byte
+	key  *client.KeyInput
+}
+
 func (cmd *SendCmd) Run() error {
 	args := cmd.Args
 	// Strip leading "--" that kong passes through.
@@ -130,24 +136,24 @@ func (cmd *SendCmd) Run() error {
 		args = args[1:]
 	}
 
-	var data []byte
+	var items []sendItem
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--keys" {
 			i++
 			if i >= len(args) {
 				return fmt.Errorf("--keys requires a value")
 			}
-			keyBytes, err := client.ParseKeyNotation(args[i])
+			ki, err := client.ParseKeyNotation(args[i])
 			if err != nil {
 				return err
 			}
-			data = append(data, keyBytes...)
+			items = append(items, sendItem{key: &ki})
 		} else {
-			data = append(data, args[i]...)
+			items = append(items, sendItem{text: []byte(args[i])})
 		}
 	}
 
-	if len(data) == 0 {
+	if len(items) == 0 {
 		return fmt.Errorf("send requires input")
 	}
 
@@ -157,7 +163,18 @@ func (cmd *SendCmd) Run() error {
 	}
 	defer c.Close()
 
-	return c.Send(cmd.Name, data)
+	for _, item := range items {
+		if item.key != nil {
+			if err := c.SendKey(cmd.Name, item.key.Code, item.key.Mods); err != nil {
+				return err
+			}
+		} else {
+			if err := c.Send(cmd.Name, item.text); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type DumpCmd struct {

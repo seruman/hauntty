@@ -167,6 +167,90 @@ func TestDumpHTML(t *testing.T) {
 	golden.AssertBytes(t, dump.VT, "dump_html.golden")
 }
 
+func TestEncodeKey(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.NewRuntime(ctx)
+	assert.NilError(t, err)
+	defer rt.Close(ctx)
+
+	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	defer term.Close(ctx)
+
+	t.Run("plain letter", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, uint32('a'), 0)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("a"))
+	})
+
+	t.Run("ctrl+c", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, uint32('c'), wasm.ModCtrl)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\x03"))
+	})
+
+	t.Run("enter", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, wasm.KeyEnter, 0)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\r"))
+	})
+
+	t.Run("escape", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, wasm.KeyEscape, 0)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\x1b"))
+	})
+
+	t.Run("arrow up", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, wasm.KeyUp, 0)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\x1b[A"))
+	})
+
+	t.Run("ctrl+shift+up", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, wasm.KeyUp, wasm.ModCtrl|wasm.ModShift)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\x1b[1;6A"))
+	})
+
+	t.Run("alt+a", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, uint32('a'), wasm.ModAlt)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\x1ba"))
+	})
+
+	t.Run("f1", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, wasm.KeyF1, 0)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\x1bOP"))
+	})
+}
+
+func TestEncodeKeyKittyMode(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.NewRuntime(ctx)
+	assert.NilError(t, err)
+	defer rt.Close(ctx)
+
+	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	defer term.Close(ctx)
+
+	// Push kitty keyboard mode (disambiguate).
+	err = term.Feed(ctx, []byte("\x1b[>1u"))
+	assert.NilError(t, err)
+
+	t.Run("ctrl+c in kitty mode", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, uint32('c'), wasm.ModCtrl)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\x1b[99;5u"))
+	})
+
+	t.Run("enter in kitty mode", func(t *testing.T) {
+		data, err := term.EncodeKey(ctx, wasm.KeyEnter, 0)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, data, []byte("\r"))
+	})
+}
+
 func TestReInit(t *testing.T) {
 	ctx := context.Background()
 	rt, err := wasm.NewRuntime(ctx)

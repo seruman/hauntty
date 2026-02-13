@@ -3,6 +3,11 @@ const vt = @import("ghostty-vt");
 const Terminal = vt.Terminal;
 const TerminalFormatter = vt.formatter.TerminalFormatter;
 const FormatterOptions = vt.formatter.Options;
+const Key = vt.input.Key;
+const KeyEvent = vt.input.KeyEvent;
+const KeyMods = vt.input.KeyMods;
+const KeyEncodeOptions = vt.input.KeyEncodeOptions;
+const encodeKey = vt.input.encodeKey;
 
 const allocator = std.heap.wasm_allocator;
 
@@ -247,6 +252,126 @@ export fn gx_dump_ptr() callconv(.c) u32 {
     const data = g_dump.?.written();
     if (data.len == 0) return 0;
     return @intFromPtr(data.ptr);
+}
+
+// ---------------------------------------------------------------------------
+// Key encoding — encode a synthetic key event using terminal mode state
+// ---------------------------------------------------------------------------
+
+// Key code constants shared with Go. ASCII printable range (0x20-0x7E)
+// maps via Key.fromASCII. Named keys use 0x100+.
+const hk_enter: u32 = 0x100;
+const hk_escape: u32 = 0x101;
+const hk_tab: u32 = 0x102;
+const hk_backspace: u32 = 0x103;
+const hk_up: u32 = 0x110;
+const hk_down: u32 = 0x111;
+const hk_left: u32 = 0x112;
+const hk_right: u32 = 0x113;
+const hk_home: u32 = 0x120;
+const hk_end: u32 = 0x121;
+const hk_page_up: u32 = 0x122;
+const hk_page_down: u32 = 0x123;
+const hk_insert: u32 = 0x124;
+const hk_delete: u32 = 0x125;
+const hk_f1: u32 = 0x130;
+const hk_f2: u32 = 0x131;
+const hk_f3: u32 = 0x132;
+const hk_f4: u32 = 0x133;
+const hk_f5: u32 = 0x134;
+const hk_f6: u32 = 0x135;
+const hk_f7: u32 = 0x136;
+const hk_f8: u32 = 0x137;
+const hk_f9: u32 = 0x138;
+const hk_f10: u32 = 0x139;
+const hk_f11: u32 = 0x13A;
+const hk_f12: u32 = 0x13B;
+
+const KeyInfo = struct {
+    key: Key,
+    codepoint: u21,
+};
+
+fn keyFromCode(code: u32) ?KeyInfo {
+    if (code >= 0x20 and code <= 0x7E) {
+        const ch: u8 = @intCast(code);
+        const k = Key.fromASCII(ch) orelse return null;
+        return .{ .key = k, .codepoint = @intCast(code) };
+    }
+    return switch (code) {
+        hk_enter => .{ .key = .enter, .codepoint = '\r' },
+        hk_escape => .{ .key = .escape, .codepoint = 0x1B },
+        hk_tab => .{ .key = .tab, .codepoint = '\t' },
+        hk_backspace => .{ .key = .backspace, .codepoint = 0x7F },
+        hk_up => .{ .key = .arrow_up, .codepoint = 0 },
+        hk_down => .{ .key = .arrow_down, .codepoint = 0 },
+        hk_left => .{ .key = .arrow_left, .codepoint = 0 },
+        hk_right => .{ .key = .arrow_right, .codepoint = 0 },
+        hk_home => .{ .key = .home, .codepoint = 0 },
+        hk_end => .{ .key = .end, .codepoint = 0 },
+        hk_page_up => .{ .key = .page_up, .codepoint = 0 },
+        hk_page_down => .{ .key = .page_down, .codepoint = 0 },
+        hk_insert => .{ .key = .insert, .codepoint = 0 },
+        hk_delete => .{ .key = .delete, .codepoint = 0 },
+        hk_f1 => .{ .key = .f1, .codepoint = 0 },
+        hk_f2 => .{ .key = .f2, .codepoint = 0 },
+        hk_f3 => .{ .key = .f3, .codepoint = 0 },
+        hk_f4 => .{ .key = .f4, .codepoint = 0 },
+        hk_f5 => .{ .key = .f5, .codepoint = 0 },
+        hk_f6 => .{ .key = .f6, .codepoint = 0 },
+        hk_f7 => .{ .key = .f7, .codepoint = 0 },
+        hk_f8 => .{ .key = .f8, .codepoint = 0 },
+        hk_f9 => .{ .key = .f9, .codepoint = 0 },
+        hk_f10 => .{ .key = .f10, .codepoint = 0 },
+        hk_f11 => .{ .key = .f11, .codepoint = 0 },
+        hk_f12 => .{ .key = .f12, .codepoint = 0 },
+        else => null,
+    };
+}
+
+var g_key_utf8: [4]u8 = undefined;
+
+/// Encode a synthetic key press using the terminal's current mode state.
+/// key_code: ASCII codepoint (0x20-0x7E) or named key constant (0x100+).
+/// mods_int: modifier bitmask (bit 0=shift, 1=ctrl, 2=alt, 3=super).
+/// Returns encoded byte count (read via gx_dump_ptr), or negative on error.
+export fn gx_encode_key(key_code: u32, mods_int: u32) callconv(.c) i32 {
+    const t = &(g_terminal orelse return -1);
+    const info = keyFromCode(key_code) orelse return -2;
+
+    const mods: KeyMods = @bitCast(@as(u16, @intCast(mods_int & 0xFFFF)));
+
+    var event: KeyEvent = .{
+        .action = .press,
+        .key = info.key,
+        .mods = mods,
+        .unshifted_codepoint = info.codepoint,
+    };
+
+    // For printable ASCII keys, set utf8 so the encoder can use it.
+    if (info.codepoint >= 0x20 and info.codepoint < 0x7F) {
+        const ch: u8 = @intCast(info.codepoint);
+        if (mods.shift and ch >= 'a' and ch <= 'z') {
+            g_key_utf8[0] = ch - 0x20;
+            event.utf8 = g_key_utf8[0..1];
+            event.consumed_mods = .{ .shift = true };
+        } else if (!mods.ctrl) {
+            g_key_utf8[0] = ch;
+            event.utf8 = g_key_utf8[0..1];
+        }
+    }
+
+    dumpFree();
+    g_dump = .init(allocator);
+
+    const opts = KeyEncodeOptions.fromTerminal(t);
+    encodeKey(&g_dump.?.writer, event, opts) catch {
+        dumpFree();
+        return -1;
+    };
+
+    const data = g_dump.?.written();
+    return @intCast(data.len);
 }
 
 // ---------------------------------------------------------------------------
