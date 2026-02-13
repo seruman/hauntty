@@ -191,6 +191,7 @@ const (
 	DumpPlain      uint32 = 0    // Plain text, no escape sequences.
 	DumpVTFull     uint32 = 1    // Full VT with all extras (for reattach).
 	DumpVTSafe     uint32 = 2    // Safe VT — colors but no palette/mode corruption.
+	DumpHTML       uint32 = 3    // HTML with inline CSS colors.
 	DumpFlagUnwrap uint32 = 0x10 // Bit 4: join soft-wrapped lines.
 	DumpFormatMask uint32 = 0x0F // Bits 0-3: format selector.
 )

@@ -143,6 +143,7 @@ export fn gx_reset() callconv(.c) i32 {
 const fmt_plain = 0;
 const fmt_vt_full = 1;
 const fmt_vt_safe = 2;
+const fmt_html = 3;
 const format_mask: u32 = 0x0F;
 const flag_unwrap: u32 = 0x10;
 
@@ -219,6 +220,17 @@ export fn gx_dump_screen(format_flags: u32) callconv(.c) i32 {
                 return -1;
             };
             g_dump.?.writer.writeAll("\x1b[0m") catch {
+                dumpFree();
+                return -1;
+            };
+        },
+        fmt_html => {
+            const fmt: TerminalFormatter = .init(t, .{
+                .emit = .html,
+                .palette = &t.colors.palette.current,
+                .unwrap = unwrap,
+            });
+            g_dump.?.writer.print("{f}", .{fmt}) catch {
                 dumpFree();
                 return -1;
             };

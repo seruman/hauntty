@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/golden"
 
 	"github.com/selman/hauntty/wasm"
 )
@@ -147,6 +148,23 @@ func TestDumpUnwrap(t *testing.T) {
 	unwrapped, err := term.DumpScreen(ctx, wasm.DumpPlain|wasm.DumpFlagUnwrap)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, unwrapped.VT, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
+}
+
+func TestDumpHTML(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.NewRuntime(ctx)
+	assert.NilError(t, err)
+	defer rt.Close(ctx)
+
+	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	defer term.Close(ctx)
+
+	err = term.Feed(ctx, []byte("Hello"))
+	assert.NilError(t, err)
+
+	dump, err := term.DumpScreen(ctx, wasm.DumpHTML)
+	assert.NilError(t, err)
+	golden.AssertBytes(t, dump.VT, "dump_html.golden")
 }
 
 func TestReInit(t *testing.T) {

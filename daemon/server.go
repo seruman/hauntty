@@ -388,6 +388,8 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	switch msg.Format & protocol.DumpFormatMask {
 	case protocol.DumpVT:
 		wasmFmt = wasm.DumpVTSafe
+	case protocol.DumpHTML:
+		wasmFmt = wasm.DumpHTML
 	default:
 		wasmFmt = wasm.DumpPlain
 	}
