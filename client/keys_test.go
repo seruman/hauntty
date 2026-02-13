@@ -80,8 +80,8 @@ func TestParseDetachKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dk, err := ParseDetachKey(tt.input)
 			assert.NilError(t, err)
-			assert.Equal(t, dk.RawByte, tt.rawByte)
-			assert.DeepEqual(t, dk.CSISeq, tt.csiSeq)
+			assert.Equal(t, dk.rawByte, tt.rawByte)
+			assert.DeepEqual(t, dk.csiSeq, tt.csiSeq)
 		})
 	}
 }

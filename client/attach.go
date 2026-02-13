@@ -43,10 +43,10 @@ func collectEnv() []string {
 }
 
 func findDetach(data []byte, dk DetachKey) int {
-	if i := bytes.IndexByte(data, dk.RawByte); i >= 0 {
+	if i := bytes.IndexByte(data, dk.rawByte); i >= 0 {
 		return i
 	}
-	return bytes.Index(data, dk.CSISeq)
+	return bytes.Index(data, dk.csiSeq)
 }
 
 func (c *Client) RunAttach(name string, command string, dk DetachKey) error {

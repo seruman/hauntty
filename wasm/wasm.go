@@ -199,8 +199,6 @@ const (
 	DumpFormatMask uint32 = 0x0F // Bits 0-3: format selector.
 )
 
-// Key codes for gx_encode_key. ASCII printable range (0x20-0x7E)
-// maps directly. Named keys use 0x100+.
 const (
 	KeyEnter     uint32 = 0x100
 	KeyEscape    uint32 = 0x101
@@ -230,7 +228,6 @@ const (
 	KeyF12       uint32 = 0x13B
 )
 
-// Modifier bitmask for gx_encode_key, matching Ghostty's KeyMods layout.
 const (
 	ModShift uint32 = 0x01
 	ModCtrl  uint32 = 0x02
