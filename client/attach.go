@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	"github.com/selman/hauntty/protocol"
 	"golang.org/x/sys/unix"
@@ -197,6 +198,10 @@ func (c *Client) RunAttach(name string, command string) error {
 		if err != nil {
 			close(done)
 			if err == io.EOF || isConnClosed(err) {
+				// Disable event-generating modes while still in raw mode
+				// so the terminal stops sending unsolicited input.
+				os.Stdout.Write([]byte("\x1b[?1004;1000;1002;1003;1006;2048l"))
+				drainStdin(fd, 20*time.Millisecond)
 				term.Restore(fd, oldState)
 				// Restore host terminal DEC private modes (XTRESTORE) and
 				// pop kitty keyboard level to pre-attach state.
@@ -215,5 +220,25 @@ func (c *Client) RunAttach(name string, command string) error {
 			term.Restore(fd, oldState)
 			os.Exit(exitCode)
 		}
+	}
+}
+
+// drainStdin reads and discards any pending bytes on fd for the given duration.
+// Uses unix.Select for timed polling because os.Stdin.Read has no timeout
+// mechanism on tty fds, SetReadDeadline only works on sockets and pipes.
+// Must be called while the terminal is in raw mode.
+func drainStdin(fd int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	buf := make([]byte, 256)
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		tv := unix.NsecToTimeval(remaining.Nanoseconds())
+		var fds unix.FdSet
+		fds.Set(fd)
+		n, _ := unix.Select(fd+1, &fds, nil, nil, &tv)
+		if n <= 0 {
+			return
+		}
+		unix.Read(fd, buf)
 	}
 }
