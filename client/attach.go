@@ -51,7 +51,7 @@ func findDetach(data []byte, dk DetachKey) int {
 	return bytes.Index(data, dk.csiSeq)
 }
 
-func (c *Client) RunAttach(name string, command string, dk DetachKey, forwardEnv []string) error {
+func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardEnv []string) error {
 	fd := int(os.Stdin.Fd())
 
 	cols, rows, err := term.GetSize(fd)

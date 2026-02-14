@@ -8,7 +8,7 @@ import (
 )
 
 // The returned tempDir (if non-empty) must be cleaned up by the caller.
-func SetupShellEnv(command string, env []string, sessionName string) (cmd string, modifiedEnv []string, tempDir string, err error) {
+func SetupShellEnv(command []string, env []string, sessionName string) (cmd []string, modifiedEnv []string, tempDir string, err error) {
 	cmd = command
 	modifiedEnv = make([]string, len(env))
 	copy(modifiedEnv, env)
@@ -20,7 +20,7 @@ func SetupShellEnv(command string, env []string, sessionName string) (cmd string
 		return cmd, modifiedEnv, "", nil
 	}
 
-	shell := detectShell(command)
+	shell := detectShell(command[0])
 	switch shell {
 	case "zsh":
 		cmd, modifiedEnv, tempDir, err = setupZsh(cmd, modifiedEnv, resourcesDir)
@@ -33,15 +33,15 @@ func SetupShellEnv(command string, env []string, sessionName string) (cmd string
 	return cmd, modifiedEnv, tempDir, err
 }
 
-func detectShell(command string) string {
-	base := filepath.Base(command)
+func detectShell(executable string) string {
+	base := filepath.Base(executable)
 	base = strings.TrimPrefix(base, "-") // -zsh → zsh (login shell)
-	switch {
-	case base == "zsh" || strings.HasPrefix(base, "zsh "):
+	switch base {
+	case "zsh":
 		return "zsh"
-	case base == "bash" || strings.HasPrefix(base, "bash "):
+	case "bash":
 		return "bash"
-	case base == "fish" || strings.HasPrefix(base, "fish "):
+	case "fish":
 		return "fish"
 	}
 	return ""
@@ -49,7 +49,7 @@ func detectShell(command string) string {
 
 // Creates a temporary ZDOTDIR with a .zshenv that sources Ghostty
 // integration, then delegates to the user's real .zshenv.
-func setupZsh(command string, env []string, resourcesDir string) (string, []string, string, error) {
+func setupZsh(command []string, env []string, resourcesDir string) ([]string, []string, string, error) {
 	origZdotdir := getEnv(env, "ZDOTDIR")
 
 	tmpDir, err := os.MkdirTemp("", "hauntty-zsh-*")
@@ -86,7 +86,7 @@ func setupZsh(command string, env []string, resourcesDir string) (string, []stri
 	return command, env, tmpDir, nil
 }
 
-func setupBash(command string, env []string, resourcesDir string) (string, []string, error) {
+func setupBash(command []string, env []string, resourcesDir string) ([]string, []string, error) {
 	integrationScript := filepath.Join(resourcesDir, "shell-integration", "bash", "ghostty.bash")
 	env = setEnv(env, "GHOSTTY_BASH_INJECT", "1")
 	env = setEnv(env, "ENV", integrationScript)

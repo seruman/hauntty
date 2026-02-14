@@ -41,32 +41,32 @@ type Session struct {
 	tempDir     string
 }
 
-func resolveCommand(command string, env []string) string {
-	if command != "" {
+func resolveCommand(command []string, env []string) []string {
+	if len(command) > 0 {
 		return command
 	}
 	for _, e := range env {
 		if len(e) > 6 && e[:6] == "SHELL=" {
-			return e[6:]
+			return []string{e[6:]}
 		}
 	}
 	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
+		return []string{shell}
 	}
-	return "/bin/sh"
+	return []string{"/bin/sh"}
 }
 
-func newSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
+func newSession(ctx context.Context, name string, command []string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
 	command = resolveCommand(command, env)
 
-	shellCmd, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
+	shellArgs, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
 	if err != nil {
 		slog.Warn("shell integration setup failed, continuing without it", "err", err)
-		shellCmd = command
+		shellArgs = command
 		shellEnv = env
 	}
 
-	cmd := exec.Command(shellCmd)
+	cmd := exec.Command(shellArgs[0], shellArgs[1:]...)
 	cmd.Env = shellEnv
 
 	ws := &pty.Winsize{Rows: rows, Cols: cols}
@@ -112,7 +112,7 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 	return s, nil
 }
 
-func restoreSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState) (*Session, error) {
+func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState) (*Session, error) {
 	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
 	if err != nil {
 		return nil, err
@@ -138,14 +138,14 @@ func restoreSession(ctx context.Context, name, command string, env []string, col
 
 	command = resolveCommand(command, env)
 
-	shellCmd, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
+	shellArgs, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
 	if err != nil {
 		slog.Warn("shell integration setup failed, continuing without it", "err", err)
-		shellCmd = command
+		shellArgs = command
 		shellEnv = env
 	}
 
-	cmd := exec.Command(shellCmd)
+	cmd := exec.Command(shellArgs[0], shellArgs[1:]...)
 	cmd.Env = shellEnv
 
 	ws := &pty.Winsize{Rows: rows, Cols: cols}

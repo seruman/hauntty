@@ -32,7 +32,7 @@ type CLI struct {
 
 type AttachCmd struct {
 	Name    string   `arg:"" optional:"" help:"Session name."`
-	Command []string `arg:"" optional:"" passthrough:"" help:"Command to run (after --)."`
+	Command []string `arg:"" optional:"" help:"Command to run."`
 }
 
 func (cmd *AttachCmd) Run() error {
@@ -54,17 +54,9 @@ func (cmd *AttachCmd) Run() error {
 	}
 	defer c.Close()
 
-	var command string
-	if len(cmd.Command) > 0 {
-		// Strip leading "--" that kong passes through.
-		args := cmd.Command
-		if len(args) > 0 && args[0] == "--" {
-			args = args[1:]
-		}
-		command = strings.Join(args, " ")
-	}
-	if command == "" {
-		command = cfg.Session.DefaultCommand
+	command := cmd.Command
+	if len(command) == 0 && cfg.Session.DefaultCommand != "" {
+		command = strings.Fields(cfg.Session.DefaultCommand)
 	}
 
 	return c.RunAttach(cmd.Name, command, dk, cfg.Session.ForwardEnv)

@@ -45,7 +45,7 @@ type Attach struct {
 	Name            string
 	Cols            uint16
 	Rows            uint16
-	Command         string
+	Command         []string
 	Env             []string
 	ScrollbackLines uint32
 }
@@ -62,8 +62,13 @@ func (m *Attach) encode(e *Encoder) error {
 	if err := e.WriteU16(m.Rows); err != nil {
 		return err
 	}
-	if err := e.WriteString(m.Command); err != nil {
+	if err := e.WriteU32(uint32(len(m.Command))); err != nil {
 		return err
+	}
+	for _, s := range m.Command {
+		if err := e.WriteString(s); err != nil {
+			return err
+		}
 	}
 	if err := e.WriteU32(uint32(len(m.Env))); err != nil {
 		return err
@@ -87,14 +92,21 @@ func (m *Attach) decode(d *Decoder) error {
 	if m.Rows, err = d.ReadU16(); err != nil {
 		return err
 	}
-	if m.Command, err = d.ReadString(); err != nil {
-		return err
-	}
-	count, err := d.ReadU32()
+	cmdCount, err := d.ReadU32()
 	if err != nil {
 		return err
 	}
-	m.Env = make([]string, count)
+	m.Command = make([]string, cmdCount)
+	for i := range m.Command {
+		if m.Command[i], err = d.ReadString(); err != nil {
+			return err
+		}
+	}
+	envCount, err := d.ReadU32()
+	if err != nil {
+		return err
+	}
+	m.Env = make([]string, envCount)
 	for i := range m.Env {
 		if m.Env[i], err = d.ReadString(); err != nil {
 			return err
