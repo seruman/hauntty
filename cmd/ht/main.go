@@ -159,13 +159,20 @@ func (cmd *SendCmd) Run() error {
 }
 
 type DumpCmd struct {
-	Name       string `arg:"" help:"Session name."`
+	Name       string `arg:"" optional:"" help:"Session name (default: current session)."`
 	Format     string `enum:"plain,vt,html" default:"plain" help:"Output format (plain, vt, html)."`
 	Join       bool   `short:"J" help:"Join soft-wrapped lines."`
 	Scrollback bool   `short:"S" help:"Include scrollback history."`
 }
 
 func (cmd *DumpCmd) Run() error {
+	if cmd.Name == "" {
+		cmd.Name = os.Getenv("HAUNTTY_SESSION")
+		if cmd.Name == "" {
+			return fmt.Errorf("session name required (or run inside a hauntty session)")
+		}
+	}
+
 	var format uint8
 	switch cmd.Format {
 	case "vt":
