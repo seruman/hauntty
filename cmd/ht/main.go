@@ -63,6 +63,9 @@ func (cmd *AttachCmd) Run() error {
 		}
 		command = strings.Join(args, " ")
 	}
+	if command == "" {
+		command = cfg.Session.DefaultCommand
+	}
 
 	return c.RunAttach(cmd.Name, command, dk, cfg.Session.ForwardEnv)
 }
