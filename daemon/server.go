@@ -219,6 +219,8 @@ func (s *Server) handleConn(netConn net.Conn) {
 			s.handleDump(conn, m)
 		case *protocol.Prune:
 			s.handlePrune(conn)
+		case *protocol.Rename:
+			s.handleRename(conn, m)
 		}
 	}
 
@@ -281,10 +283,11 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 			go func() {
 				<-sess.done
 				s.mu.Lock()
-				delete(s.sessions, name)
+				currentName := sess.Name
+				delete(s.sessions, currentName)
 				empty := len(s.sessions) == 0
 				s.mu.Unlock()
-				CleanState(name)
+				CleanState(currentName)
 				if s.autoExit && empty {
 					slog.Info("auto-exit: last session ended, shutting down")
 					s.Shutdown()
@@ -485,6 +488,43 @@ func (s *Server) handlePrune(conn *protocol.Conn) {
 
 	if err := conn.WriteMessage(&protocol.PruneResponse{Count: count}); err != nil {
 		slog.Debug("write prune response", "err", err)
+	}
+}
+
+func (s *Server) handleRename(conn *protocol.Conn, msg *protocol.Rename) {
+	if msg.NewName == "" || msg.OldName == msg.NewName {
+		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "invalid rename"}); err != nil {
+			slog.Debug("write error response", "err", err)
+		}
+		return
+	}
+
+	s.mu.Lock()
+	if _, exists := s.sessions[msg.NewName]; exists {
+		s.mu.Unlock()
+		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session already exists"}); err != nil {
+			slog.Debug("write error response", "err", err)
+		}
+		return
+	}
+
+	if sess, ok := s.sessions[msg.OldName]; ok {
+		delete(s.sessions, msg.OldName)
+		sess.Name = msg.NewName
+		s.sessions[msg.NewName] = sess
+		s.mu.Unlock()
+	} else {
+		s.mu.Unlock()
+		if err := RenameState(msg.OldName, msg.NewName); err != nil {
+			if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+				slog.Debug("write error response", "err", err)
+			}
+			return
+		}
+	}
+
+	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.NewName}); err != nil {
+		slog.Debug("write ok response", "err", err)
 	}
 }
 

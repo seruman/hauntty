@@ -29,6 +29,7 @@ type CLI struct {
 	Dump   DumpCmd   `cmd:"" help:"Dump session contents."`
 	Detach DetachCmd `cmd:"" help:"Detach from current session."`
 	Wait   WaitCmd   `cmd:"" help:"Wait for session output to match a pattern."`
+	Rename RenameCmd `cmd:"" aliases:"mv" help:"Rename a session."`
 	Prune  PruneCmd  `cmd:"" help:"Delete dead session state files."`
 	Config ConfigCmd `cmd:"" help:"Print effective configuration."`
 	Daemon DaemonCmd `cmd:"" help:"Start daemon in foreground."`
@@ -284,6 +285,25 @@ func (cmd *WaitCmd) Run() error {
 
 		time.Sleep(time.Duration(cmd.Interval) * time.Millisecond)
 	}
+}
+
+type RenameCmd struct {
+	Old string `arg:"" help:"Current session name."`
+	New string `arg:"" help:"New session name."`
+}
+
+func (cmd *RenameCmd) Run() error {
+	c, err := client.Connect()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if err := c.Rename(cmd.Old, cmd.New); err != nil {
+		return err
+	}
+	fmt.Printf("renamed %q to %q\n", cmd.Old, cmd.New)
+	return nil
 }
 
 type PruneCmd struct{}
