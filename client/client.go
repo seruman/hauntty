@@ -12,8 +12,8 @@ type Client struct {
 	netConn net.Conn
 }
 
-func Connect() (*Client, error) {
-	sock := protocol.SocketPath()
+func Connect(socketPath string) (*Client, error) {
+	sock := protocol.SocketPathFrom(socketPath)
 	nc, err := net.Dial("unix", sock)
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w", err)

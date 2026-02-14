@@ -22,6 +22,7 @@ import (
 )
 
 type CLI struct {
+	Socket string    `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
 	Attach AttachCmd `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
 	List   ListCmd   `cmd:"" aliases:"ls" help:"List sessions."`
 	Kill   KillCmd   `cmd:"" help:"Kill a session."`
@@ -40,20 +41,16 @@ type AttachCmd struct {
 	Command []string `arg:"" optional:"" help:"Command to run."`
 }
 
-func (cmd *AttachCmd) Run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
+func (cmd *AttachCmd) Run(cfg *config.Config) error {
 	dk, err := client.ParseDetachKey(cfg.Client.DetachKeybind)
 	if err != nil {
 		return fmt.Errorf("invalid detach_keybind %q: %w", cfg.Client.DetachKeybind, err)
 	}
 
-	if err := ensureDaemon(); err != nil {
+	if err := ensureDaemon(cfg.Daemon.SocketPath); err != nil {
 		return err
 	}
-	c, err := client.Connect()
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -71,8 +68,8 @@ type ListCmd struct {
 	All bool `short:"a" help:"Show all sessions including dead."`
 }
 
-func (cmd *ListCmd) Run() error {
-	c, err := client.Connect()
+func (cmd *ListCmd) Run(cfg *config.Config) error {
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -121,8 +118,8 @@ type KillCmd struct {
 	Name string `arg:"" help:"Session name."`
 }
 
-func (cmd *KillCmd) Run() error {
-	c, err := client.Connect()
+func (cmd *KillCmd) Run(cfg *config.Config) error {
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -141,12 +138,12 @@ type SendCmd struct {
 	Key  []string `short:"k" name:"key" help:"Key notation (repeatable)." sep:"none"`
 }
 
-func (cmd *SendCmd) Run() error {
+func (cmd *SendCmd) Run(cfg *config.Config) error {
 	if len(cmd.Text) == 0 && len(cmd.Key) == 0 {
 		return fmt.Errorf("send requires input")
 	}
 
-	c, err := client.Connect()
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -176,7 +173,7 @@ type DumpCmd struct {
 	Scrollback bool   `short:"S" help:"Include scrollback history."`
 }
 
-func (cmd *DumpCmd) Run() error {
+func (cmd *DumpCmd) Run(cfg *config.Config) error {
 	if cmd.Name == "" {
 		cmd.Name = os.Getenv("HAUNTTY_SESSION")
 		if cmd.Name == "" {
@@ -198,7 +195,7 @@ func (cmd *DumpCmd) Run() error {
 		format |= protocol.DumpFlagScrollback
 	}
 
-	c, err := client.Connect()
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -214,13 +211,13 @@ func (cmd *DumpCmd) Run() error {
 
 type DetachCmd struct{}
 
-func (cmd *DetachCmd) Run() error {
+func (cmd *DetachCmd) Run(cfg *config.Config) error {
 	sessionName := os.Getenv("HAUNTTY_SESSION")
 	if sessionName == "" {
 		return fmt.Errorf("not inside a hauntty session")
 	}
 
-	c, err := client.Connect()
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -238,7 +235,7 @@ type WaitCmd struct {
 	Interval int    `default:"100" help:"Poll interval in milliseconds."`
 }
 
-func (cmd *WaitCmd) Run() error {
+func (cmd *WaitCmd) Run(cfg *config.Config) error {
 	var match func(string) bool
 	if cmd.Regex {
 		re, err := regexp.Compile(cmd.Pattern)
@@ -250,7 +247,7 @@ func (cmd *WaitCmd) Run() error {
 		match = func(s string) bool { return strings.Contains(s, cmd.Pattern) }
 	}
 
-	c, err := client.Connect()
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		os.Exit(2)
 	}
@@ -292,8 +289,8 @@ type RenameCmd struct {
 	New string `arg:"" help:"New session name."`
 }
 
-func (cmd *RenameCmd) Run() error {
-	c, err := client.Connect()
+func (cmd *RenameCmd) Run(cfg *config.Config) error {
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -308,8 +305,8 @@ func (cmd *RenameCmd) Run() error {
 
 type PruneCmd struct{}
 
-func (cmd *PruneCmd) Run() error {
-	c, err := client.Connect()
+func (cmd *PruneCmd) Run(cfg *config.Config) error {
+	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
@@ -329,11 +326,7 @@ func (cmd *PruneCmd) Run() error {
 
 type ConfigCmd struct{}
 
-func (cmd *ConfigCmd) Run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
+func (cmd *ConfigCmd) Run(cfg *config.Config) error {
 	return toml.NewEncoder(os.Stdout).Encode(cfg)
 }
 
@@ -341,12 +334,7 @@ type DaemonCmd struct {
 	AutoExit bool `help:"Exit when last session dies."`
 }
 
-func (cmd *DaemonCmd) Run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
+func (cmd *DaemonCmd) Run(cfg *config.Config) error {
 	if cmd.AutoExit {
 		cfg.Daemon.AutoExit = true
 	}
@@ -363,12 +351,17 @@ func (cmd *DaemonCmd) Run() error {
 func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli, kong.UsageOnError())
-	err := ctx.Run()
+	cfg, err := config.Load()
+	ctx.FatalIfErrorf(err)
+	if cli.Socket != "" {
+		cfg.Daemon.SocketPath = cli.Socket
+	}
+	err = ctx.Run(cfg)
 	ctx.FatalIfErrorf(err)
 }
 
-func ensureDaemon() error {
-	if client.DaemonRunning() {
+func ensureDaemon(socketPath string) error {
+	if client.DaemonRunning(socketPath) {
 		return nil
 	}
 	exe, err := os.Executable()
@@ -396,7 +389,7 @@ func ensureDaemon() error {
 	logFile.Close()
 	cmd.Process.Release()
 
-	sock := protocol.SocketPath()
+	sock := protocol.SocketPathFrom(socketPath)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		conn, err := net.Dial("unix", sock)
