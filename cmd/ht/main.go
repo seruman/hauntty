@@ -64,7 +64,7 @@ func (cmd *AttachCmd) Run() error {
 		command = strings.Join(args, " ")
 	}
 
-	return c.RunAttach(cmd.Name, command, dk)
+	return c.RunAttach(cmd.Name, command, dk, cfg.Session.ForwardEnv)
 }
 
 type ListCmd struct {

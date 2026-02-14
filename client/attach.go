@@ -24,17 +24,19 @@ func isConnClosed(err error) bool {
 	return false
 }
 
-var envVarsToForward = []string{
-	"SHELL",
-	"GHOSTTY_RESOURCES_DIR",
+var alwaysForwardEnv = []string{
 	"TERM",
-	"COLORTERM",
-	"GHOSTTY_BIN_DIR",
+	"SHELL",
 }
 
-func collectEnv() []string {
+func collectEnv(extra []string) []string {
 	var env []string
-	for _, key := range envVarsToForward {
+	for _, key := range alwaysForwardEnv {
+		if val, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+val)
+		}
+	}
+	for _, key := range extra {
 		if val, ok := os.LookupEnv(key); ok {
 			env = append(env, key+"="+val)
 		}
@@ -49,7 +51,7 @@ func findDetach(data []byte, dk DetachKey) int {
 	return bytes.Index(data, dk.csiSeq)
 }
 
-func (c *Client) RunAttach(name string, command string, dk DetachKey) error {
+func (c *Client) RunAttach(name string, command string, dk DetachKey, forwardEnv []string) error {
 	fd := int(os.Stdin.Fd())
 
 	cols, rows, err := term.GetSize(fd)
@@ -57,7 +59,7 @@ func (c *Client) RunAttach(name string, command string, dk DetachKey) error {
 		return fmt.Errorf("get terminal size: %w", err)
 	}
 
-	env := collectEnv()
+	env := collectEnv(forwardEnv)
 
 	ok, err := c.Attach(name, uint16(cols), uint16(rows), command, env, 10000)
 	if err != nil {

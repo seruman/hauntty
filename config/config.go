@@ -43,7 +43,7 @@ func Default() *Config {
 			DetachKeybind: "ctrl+]",
 		},
 		Session: SessionConfig{
-			ForwardEnv: []string{"GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},
+			ForwardEnv: []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},
 		},
 	}
 }
