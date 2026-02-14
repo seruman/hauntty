@@ -159,9 +159,10 @@ func (cmd *SendCmd) Run() error {
 }
 
 type DumpCmd struct {
-	Name   string `arg:"" help:"Session name."`
-	Format string `enum:"plain,vt,html" default:"plain" help:"Output format (plain, vt, html)."`
-	Join   bool   `short:"J" help:"Join soft-wrapped lines."`
+	Name       string `arg:"" help:"Session name."`
+	Format     string `enum:"plain,vt,html" default:"plain" help:"Output format (plain, vt, html)."`
+	Join       bool   `short:"J" help:"Join soft-wrapped lines."`
+	Scrollback bool   `short:"S" help:"Include scrollback history."`
 }
 
 func (cmd *DumpCmd) Run() error {
@@ -174,6 +175,9 @@ func (cmd *DumpCmd) Run() error {
 	}
 	if cmd.Join {
 		format |= protocol.DumpFlagUnwrap
+	}
+	if cmd.Scrollback {
+		format |= protocol.DumpFlagScrollback
 	}
 
 	c, err := client.Connect()

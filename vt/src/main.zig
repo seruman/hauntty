@@ -1,7 +1,9 @@
 const std = @import("std");
 const vt = @import("ghostty-vt");
 const Terminal = vt.Terminal;
+const Selection = vt.Selection;
 const TerminalFormatter = vt.formatter.TerminalFormatter;
+const ScreenFormatter = vt.formatter.ScreenFormatter;
 const FormatterOptions = vt.formatter.Options;
 const Key = vt.input.Key;
 const KeyEvent = vt.input.KeyEvent;
@@ -151,6 +153,7 @@ const fmt_vt_safe = 2;
 const fmt_html = 3;
 const format_mask: u32 = 0x0F;
 const flag_unwrap: u32 = 0x10;
+const flag_scrollback: u32 = 0x20;
 
 fn dumpFree() void {
     if (g_dump) |*d| {
@@ -159,32 +162,47 @@ fn dumpFree() void {
     }
 }
 
-/// Dump the screen. format_flags: bits 0-3 = format (0=plain, 1=vt-full, 2=vt-safe), bit 4 = unwrap.
+/// Dump the screen. format_flags: bits 0-3 = format (0=plain, 1=vt-full, 2=vt-safe, 3=html),
+/// bit 4 = unwrap, bit 5 = include scrollback (default: visible only).
 export fn gx_dump_screen(format_flags: u32) callconv(.c) i32 {
     const t = &(g_terminal orelse return -1);
 
     const format = format_flags & format_mask;
     const unwrap = (format_flags & flag_unwrap) != 0;
+    const scrollback = (format_flags & flag_scrollback) != 0;
 
     dumpFree();
 
     g_dump = .init(allocator);
 
+    // Visible-only: restrict content to the active area.
+    // Scrollback: null selection = all content including scrollback.
+    const active_content: ScreenFormatter.Content = if (scrollback)
+        .{ .selection = null }
+    else
+        .{ .selection = Selection.init(
+            t.screens.active.pages.getTopLeft(.active),
+            t.screens.active.pages.getBottomRight(.active) orelse
+                t.screens.active.pages.getTopLeft(.active),
+            false,
+        ) };
+
     switch (format) {
         fmt_plain => {
             // Plain text — no escape sequences.
-            const fmt: TerminalFormatter = .init(t, .{
+            var fmt: TerminalFormatter = .init(t, .{
                 .emit = .plain,
                 .palette = &t.colors.palette.current,
                 .unwrap = unwrap,
             });
+            fmt.content = active_content;
             g_dump.?.writer.print("{f}", .{fmt}) catch {
                 dumpFree();
                 return -1;
             };
         },
         fmt_vt_full => {
-            // VT for reattach state restoration.
+            // VT for reattach state restoration — always includes scrollback.
             // palette=false: OSC 4 palette sequences override host terminal colors.
             // tabstops=false: tabstop restoration moves cursor after CUP, corrupting position.
             var fmt: TerminalFormatter = .init(t, .{
@@ -216,7 +234,7 @@ export fn gx_dump_screen(format_flags: u32) callconv(.c) i32 {
                     .palette = &t.colors.palette.current,
                     .unwrap = unwrap,
                 },
-                .content = .{ .selection = null },
+                .content = active_content,
                 .extra = .none,
                 .pin_map = null,
             };
@@ -230,11 +248,12 @@ export fn gx_dump_screen(format_flags: u32) callconv(.c) i32 {
             };
         },
         fmt_html => {
-            const fmt: TerminalFormatter = .init(t, .{
+            var fmt: TerminalFormatter = .init(t, .{
                 .emit = .html,
                 .palette = &t.colors.palette.current,
                 .unwrap = unwrap,
             });
+            fmt.content = active_content;
             g_dump.?.writer.print("{f}", .{fmt}) catch {
                 dumpFree();
                 return -1;

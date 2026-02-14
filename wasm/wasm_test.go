@@ -2,6 +2,7 @@ package wasm_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -148,6 +149,34 @@ func TestDumpUnwrap(t *testing.T) {
 	unwrapped, err := term.DumpScreen(ctx, wasm.DumpPlain|wasm.DumpFlagUnwrap)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, unwrapped.VT, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
+}
+
+func TestDumpScrollback(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.NewRuntime(ctx)
+	assert.NilError(t, err)
+	defer rt.Close(ctx)
+
+	// 80x5 terminal: 10 lines will push lines 1-6 into scrollback.
+	term := newTerminal(t, ctx, rt, 80, 5, 100)
+	defer term.Close(ctx)
+
+	for i := 1; i <= 10; i++ {
+		err = term.Feed(ctx, []byte(fmt.Sprintf("line %d\r\n", i)))
+		assert.NilError(t, err)
+	}
+
+	t.Run("visible only", func(t *testing.T) {
+		dump, err := term.DumpScreen(ctx, wasm.DumpPlain)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, dump.VT, []byte("line 7\nline 8\nline 9\nline 10"))
+	})
+
+	t.Run("with scrollback", func(t *testing.T) {
+		dump, err := term.DumpScreen(ctx, wasm.DumpPlain|wasm.DumpFlagScrollback)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, dump.VT, []byte("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"))
+	})
 }
 
 func TestDumpHTML(t *testing.T) {
