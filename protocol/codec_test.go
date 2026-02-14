@@ -17,6 +17,8 @@ func TestRoundTrip(t *testing.T) {
 			Name:            "my-session",
 			Cols:            120,
 			Rows:            40,
+			Xpixel:          1920,
+			Ypixel:          1080,
 			Command:         []string{"/bin/bash"},
 			Env:             []string{"TERM=xterm-256color", "HOME=/home/user"},
 			ScrollbackLines: 10000,
@@ -44,7 +46,7 @@ func TestRoundTrip(t *testing.T) {
 		}},
 		{"Input", &Input{Data: []byte("hello world\n")}},
 		{"InputEmpty", &Input{Data: []byte{}}},
-		{"Resize", &Resize{Cols: 200, Rows: 50}},
+		{"Resize", &Resize{Cols: 200, Rows: 50, Xpixel: 3200, Ypixel: 1600}},
 		{"Detach", &Detach{}},
 		{"List", &List{}},
 		{"Kill", &Kill{Name: "doomed-session"}},
@@ -224,7 +226,7 @@ func TestMultipleMessages(t *testing.T) {
 		&Attach{Name: "s1", Cols: 80, Rows: 24, Command: []string{"bash"}, Env: []string{"A=1"}, ScrollbackLines: 1000},
 		&Input{Data: []byte("ls\n")},
 		&Output{Data: []byte("file1\nfile2\n")},
-		&Resize{Cols: 100, Rows: 50},
+		&Resize{Cols: 100, Rows: 50, Xpixel: 1600, Ypixel: 800},
 		&Detach{},
 	}
 

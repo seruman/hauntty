@@ -56,7 +56,7 @@ func resolveCommand(command []string, env []string) []string {
 	return []string{"/bin/sh"}
 }
 
-func newSession(ctx context.Context, name string, command []string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
+func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
 	command = resolveCommand(command, env)
 
 	shellArgs, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
@@ -69,7 +69,7 @@ func newSession(ctx context.Context, name string, command []string, env []string
 	cmd := exec.Command(shellArgs[0], shellArgs[1:]...)
 	cmd.Env = shellEnv
 
-	ws := &pty.Winsize{Rows: rows, Cols: cols}
+	ws := &pty.Winsize{Rows: rows, Cols: cols, X: xpixel, Y: ypixel}
 	ptmx, err := pty.StartWithSize(cmd, ws)
 	if err != nil {
 		if tempDir != "" {
@@ -112,7 +112,7 @@ func newSession(ctx context.Context, name string, command []string, env []string
 	return s, nil
 }
 
-func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState) (*Session, error) {
+func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState) (*Session, error) {
 	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
 	if err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func restoreSession(ctx context.Context, name string, command []string, env []st
 	cmd := exec.Command(shellArgs[0], shellArgs[1:]...)
 	cmd.Env = shellEnv
 
-	ws := &pty.Winsize{Rows: rows, Cols: cols}
+	ws := &pty.Winsize{Rows: rows, Cols: cols, X: xpixel, Y: ypixel}
 	ptmx, err := pty.StartWithSize(cmd, ws)
 	if err != nil {
 		term.Close(ctx)
@@ -237,7 +237,7 @@ func (s *Session) readLoop(ctx context.Context) {
 	s.clientMu.Unlock()
 }
 
-func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows uint16) error {
+func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16) error {
 	s.disconnectClient()
 
 	dump, err := s.term.DumpScreen(context.Background(), wasm.DumpVTFull)
@@ -260,7 +260,7 @@ func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows
 	s.clientMu.Unlock()
 
 	if cols != s.Cols || rows != s.Rows {
-		s.resize(cols, rows)
+		s.resize(cols, rows, xpixel, ypixel)
 	}
 
 	return nil
@@ -297,13 +297,13 @@ func (s *Session) sendInput(data []byte) error {
 	return err
 }
 
-func (s *Session) resize(cols, rows uint16) error {
+func (s *Session) resize(cols, rows, xpixel, ypixel uint16) error {
 	s.mu.Lock()
 	s.Cols = cols
 	s.Rows = rows
 	s.mu.Unlock()
 
-	err := pty.Setsize(s.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+	err := pty.Setsize(s.ptmx, &pty.Winsize{Rows: rows, Cols: cols, X: xpixel, Y: ypixel})
 	if err != nil {
 		return err
 	}

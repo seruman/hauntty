@@ -54,14 +54,14 @@ func findDetach(data []byte, dk DetachKey) int {
 func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardEnv []string) error {
 	fd := int(os.Stdin.Fd())
 
-	cols, rows, err := term.GetSize(fd)
+	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
 	if err != nil {
 		return fmt.Errorf("get terminal size: %w", err)
 	}
 
 	env := collectEnv(forwardEnv)
 
-	ok, err := c.Attach(name, uint16(cols), uint16(rows), command, env, 10000)
+	ok, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000)
 	if err != nil {
 		return err
 	}
@@ -125,12 +125,17 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		for {
 			select {
 			case <-sigwinch:
-				w, h, err := term.GetSize(fd)
+				ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
 				if err != nil {
 					continue
 				}
 				mu.Lock()
-				werr := c.WriteMessage(&protocol.Resize{Cols: uint16(w), Rows: uint16(h)})
+				werr := c.WriteMessage(&protocol.Resize{
+					Cols:   uint16(ws.Col),
+					Rows:   uint16(ws.Row),
+					Xpixel: ws.Xpixel,
+					Ypixel: ws.Ypixel,
+				})
 				mu.Unlock()
 				if werr != nil {
 					return

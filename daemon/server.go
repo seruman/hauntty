@@ -186,7 +186,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 			}
 		case *protocol.Resize:
 			if attached != nil {
-				attached.resize(m.Cols, m.Rows)
+				attached.resize(m.Cols, m.Rows, m.Xpixel, m.Ypixel)
 			}
 		case *protocol.Detach:
 			target := attached
@@ -246,13 +246,13 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		var err error
 		if state, serr := LoadState(name); serr == nil {
 			slog.Info("restoring dead session", "session", name)
-			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT, state)
+			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, state)
 			if err == nil {
 				CleanState(name)
 			}
 		}
 		if sess == nil {
-			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT)
+			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT)
 		}
 		if err != nil {
 			if werr := conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()}); werr != nil {
@@ -300,7 +300,7 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		return nil, err
 	}
 
-	if err := sess.attach(conn, closeConn, msg.Cols, msg.Rows); err != nil {
+	if err := sess.attach(conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel); err != nil {
 		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: err.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
 		}

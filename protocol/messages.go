@@ -45,6 +45,8 @@ type Attach struct {
 	Name            string
 	Cols            uint16
 	Rows            uint16
+	Xpixel          uint16
+	Ypixel          uint16
 	Command         []string
 	Env             []string
 	ScrollbackLines uint32
@@ -60,6 +62,12 @@ func (m *Attach) encode(e *Encoder) error {
 		return err
 	}
 	if err := e.WriteU16(m.Rows); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Xpixel); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Ypixel); err != nil {
 		return err
 	}
 	if err := e.WriteU32(uint32(len(m.Command))); err != nil {
@@ -90,6 +98,12 @@ func (m *Attach) decode(d *Decoder) error {
 		return err
 	}
 	if m.Rows, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.Xpixel, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.Ypixel, err = d.ReadU16(); err != nil {
 		return err
 	}
 	cmdCount, err := d.ReadU32()
@@ -133,8 +147,10 @@ func (m *Input) decode(d *Decoder) error {
 }
 
 type Resize struct {
-	Cols uint16
-	Rows uint16
+	Cols   uint16
+	Rows   uint16
+	Xpixel uint16
+	Ypixel uint16
 }
 
 func (m *Resize) Type() uint8 { return TypeResize }
@@ -143,7 +159,13 @@ func (m *Resize) encode(e *Encoder) error {
 	if err := e.WriteU16(m.Cols); err != nil {
 		return err
 	}
-	return e.WriteU16(m.Rows)
+	if err := e.WriteU16(m.Rows); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Xpixel); err != nil {
+		return err
+	}
+	return e.WriteU16(m.Ypixel)
 }
 
 func (m *Resize) decode(d *Decoder) error {
@@ -151,7 +173,13 @@ func (m *Resize) decode(d *Decoder) error {
 	if m.Cols, err = d.ReadU16(); err != nil {
 		return err
 	}
-	m.Rows, err = d.ReadU16()
+	if m.Rows, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.Xpixel, err = d.ReadU16(); err != nil {
+		return err
+	}
+	m.Ypixel, err = d.ReadU16()
 	return err
 }
 

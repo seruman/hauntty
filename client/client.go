@@ -46,11 +46,13 @@ func (c *Client) WriteMessage(msg protocol.Message) error {
 	return c.conn.WriteMessage(msg)
 }
 
-func (c *Client) Attach(name string, cols, rows uint16, command []string, env []string, scrollback uint32) (*protocol.OK, error) {
+func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command []string, env []string, scrollback uint32) (*protocol.OK, error) {
 	err := c.conn.WriteMessage(&protocol.Attach{
 		Name:            name,
 		Cols:            cols,
 		Rows:            rows,
+		Xpixel:          xpixel,
+		Ypixel:          ypixel,
 		Command:         command,
 		Env:             env,
 		ScrollbackLines: scrollback,
