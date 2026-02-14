@@ -118,6 +118,8 @@ func newMessage(t uint8) (Message, error) {
 		return &Prune{}, nil
 	case TypeSendKey:
 		return &SendKey{}, nil
+	case TypeRename:
+		return &Rename{}, nil
 	case TypeOK:
 		return &OK{}, nil
 	case TypeError:

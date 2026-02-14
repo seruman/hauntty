@@ -12,6 +12,7 @@ const (
 	TypeDump    uint8 = 0x08
 	TypePrune   uint8 = 0x09
 	TypeSendKey uint8 = 0x0A
+	TypeRename  uint8 = 0x0B
 
 	// Daemon → Client
 	TypeOK             uint8 = 0x80
@@ -296,6 +297,29 @@ func (m *Dump) decode(d *Decoder) error {
 		return err
 	}
 	m.Format, err = d.ReadU8()
+	return err
+}
+
+type Rename struct {
+	OldName string
+	NewName string
+}
+
+func (m *Rename) Type() uint8 { return TypeRename }
+
+func (m *Rename) encode(e *Encoder) error {
+	if err := e.WriteString(m.OldName); err != nil {
+		return err
+	}
+	return e.WriteString(m.NewName)
+}
+
+func (m *Rename) decode(d *Decoder) error {
+	var err error
+	if m.OldName, err = d.ReadString(); err != nil {
+		return err
+	}
+	m.NewName, err = d.ReadString()
 	return err
 }
 

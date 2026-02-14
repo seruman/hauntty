@@ -84,6 +84,7 @@ func TestRoundTrip(t *testing.T) {
 		{"PruneResponse", &PruneResponse{Count: 3}},
 		{"ClientsChanged", &ClientsChanged{Count: 2, Cols: 80, Rows: 24}},
 		{"ClientsChangedSingle", &ClientsChanged{Count: 1, Cols: 120, Rows: 40}},
+		{"Rename", &Rename{OldName: "old-session", NewName: "new-session"}},
 	}
 
 	for _, tt := range tests {
