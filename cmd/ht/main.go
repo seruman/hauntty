@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -264,7 +266,7 @@ func (cmd *DaemonCmd) Run() error {
 	}
 
 	ctx := context.Background()
-	srv, err := daemon.New(ctx, &cfg.Daemon)
+	srv, err := daemon.New(ctx, &cfg.Daemon, cfg.Session.ResizePolicy)
 	if err != nil {
 		return fmt.Errorf("init daemon: %w", err)
 	}
@@ -287,22 +289,36 @@ func ensureDaemon() error {
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
 	}
+	dir := filepath.Dir(protocol.SocketPath())
+	os.MkdirAll(dir, 0o700)
+	logFile, err := os.CreateTemp(dir, "hauntty-server-*.log")
+	if err != nil {
+		return fmt.Errorf("create daemon log: %w", err)
+	}
+
 	cmd := exec.Command(exe, "daemon")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		os.Remove(logFile.Name())
 		return fmt.Errorf("start daemon: %w", err)
 	}
+	finalPath := protocol.LogPath(cmd.Process.Pid)
+	os.Rename(logFile.Name(), finalPath)
+	logFile.Close()
 	cmd.Process.Release()
 
 	sock := protocol.SocketPath()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(sock); err == nil {
+		conn, err := net.Dial("unix", sock)
+		if err == nil {
+			conn.Close()
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for daemon socket at %s", sock)
+	return fmt.Errorf("timed out waiting for daemon at %s", sock)
 }

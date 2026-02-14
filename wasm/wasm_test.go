@@ -162,7 +162,7 @@ func TestDumpScrollback(t *testing.T) {
 	defer term.Close(ctx)
 
 	for i := 1; i <= 10; i++ {
-		err = term.Feed(ctx, []byte(fmt.Sprintf("line %d\r\n", i)))
+		err = term.Feed(ctx, fmt.Appendf(nil, "line %d\r\n", i))
 		assert.NilError(t, err)
 	}
 

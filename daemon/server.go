@@ -33,11 +33,12 @@ type Server struct {
 	listener          net.Listener
 	persister         *Persister
 	defaultScrollback uint32
+	resizePolicy      string
 	autoExit          bool
 	shutdownOnce      sync.Once
 }
 
-func New(ctx context.Context, cfg *config.DaemonConfig) (*Server, error) {
+func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy string) (*Server, error) {
 	rt, err := wasm.NewRuntime(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: init wasm runtime: %w", err)
@@ -52,6 +53,7 @@ func New(ctx context.Context, cfg *config.DaemonConfig) (*Server, error) {
 		ctx:               ctx,
 		cancel:            cancel,
 		defaultScrollback: cfg.DefaultScrollback,
+		resizePolicy:      resizePolicy,
 		autoExit:          cfg.AutoExit,
 	}
 
@@ -164,8 +166,8 @@ func (s *Server) handleConn(netConn net.Conn) {
 		return
 	}
 
-	// Attached session for this connection (set by handleAttach).
 	var attached *Session
+	var ac *attachedClient
 
 	for {
 		msg, err := conn.ReadMessage()
@@ -175,7 +177,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 
 		switch m := msg.(type) {
 		case *protocol.Attach:
-			attached, err = s.handleAttach(conn, netConn.Close, m)
+			attached, ac, err = s.handleAttach(conn, netConn.Close, m)
 			if err != nil {
 				slog.Debug("attach error", "err", err)
 				return
@@ -185,21 +187,25 @@ func (s *Server) handleConn(netConn net.Conn) {
 				attached.sendInput(m.Data)
 			}
 		case *protocol.Resize:
-			if attached != nil {
-				attached.resize(m.Cols, m.Rows, m.Xpixel, m.Ypixel)
+			if ac != nil {
+				ac.cols = m.Cols
+				ac.rows = m.Rows
+				ac.xpixel = m.Xpixel
+				ac.ypixel = m.Ypixel
+				attached.arbitrateResize()
 			}
 		case *protocol.Detach:
-			target := attached
 			if m.Name != "" {
 				s.mu.RLock()
-				target = s.sessions[m.Name]
+				target := s.sessions[m.Name]
 				s.mu.RUnlock()
-			}
-			if target != nil {
-				target.disconnectClient()
-				if target == attached {
-					attached = nil
+				if target != nil {
+					target.disconnectAllClients()
 				}
+			} else if attached != nil {
+				attached.detachClient(ac)
+				attached = nil
+				ac = nil
 			}
 		case *protocol.List:
 			s.handleList(conn)
@@ -216,13 +222,12 @@ func (s *Server) handleConn(netConn net.Conn) {
 		}
 	}
 
-	// Connection closed — detach if attached.
 	if attached != nil {
-		attached.detach()
+		attached.detachClient(ac)
 	}
 }
 
-func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach) (*Session, error) {
+func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach) (*Session, *attachedClient, error) {
 	name := msg.Name
 
 	s.mu.RLock()
@@ -246,19 +251,19 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		var err error
 		if state, serr := LoadState(name); serr == nil {
 			slog.Info("restoring dead session", "session", name)
-			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, state)
+			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, state, s.resizePolicy)
 			if err == nil {
 				CleanState(name)
 			}
 		}
 		if sess == nil {
-			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT)
+			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, s.resizePolicy)
 		}
 		if err != nil {
 			if werr := conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()}); werr != nil {
 				slog.Debug("write error response", "err", werr)
 			}
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Check-and-insert: another goroutine may have raced us for the
@@ -297,17 +302,18 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		Created:     created,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if err := sess.attach(conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel); err != nil {
-		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: err.Error()}); werr != nil {
+	ac, aerr := sess.attach(conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel)
+	if aerr != nil {
+		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: aerr.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
 		}
-		return nil, err
+		return nil, nil, aerr
 	}
 
-	return sess, nil
+	return sess, ac, nil
 }
 
 func (s *Server) handleList(conn *protocol.Conn) {

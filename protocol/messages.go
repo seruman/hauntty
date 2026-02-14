@@ -14,14 +14,15 @@ const (
 	TypeSendKey uint8 = 0x0A
 
 	// Daemon → Client
-	TypeOK            uint8 = 0x80
-	TypeError         uint8 = 0x81
-	TypeOutput        uint8 = 0x82
-	TypeState         uint8 = 0x83
-	TypeSessions      uint8 = 0x84
-	TypeExited        uint8 = 0x85
-	TypeDumpResponse  uint8 = 0x86
-	TypePruneResponse uint8 = 0x87
+	TypeOK             uint8 = 0x80
+	TypeError          uint8 = 0x81
+	TypeOutput         uint8 = 0x82
+	TypeState          uint8 = 0x83
+	TypeSessions       uint8 = 0x84
+	TypeExited         uint8 = 0x85
+	TypeDumpResponse   uint8 = 0x86
+	TypePruneResponse  uint8 = 0x87
+	TypeClientsChanged uint8 = 0x88
 )
 
 type Message interface {
@@ -534,5 +535,35 @@ func (m *PruneResponse) encode(e *Encoder) error {
 func (m *PruneResponse) decode(d *Decoder) error {
 	var err error
 	m.Count, err = d.ReadU32()
+	return err
+}
+
+type ClientsChanged struct {
+	Count uint16
+	Cols  uint16
+	Rows  uint16
+}
+
+func (m *ClientsChanged) Type() uint8 { return TypeClientsChanged }
+
+func (m *ClientsChanged) encode(e *Encoder) error {
+	if err := e.WriteU16(m.Count); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Cols); err != nil {
+		return err
+	}
+	return e.WriteU16(m.Rows)
+}
+
+func (m *ClientsChanged) decode(d *Decoder) error {
+	var err error
+	if m.Count, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.Cols, err = d.ReadU16(); err != nil {
+		return err
+	}
+	m.Rows, err = d.ReadU16()
 	return err
 }

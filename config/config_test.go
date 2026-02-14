@@ -16,6 +16,7 @@ func TestDefaults(t *testing.T) {
 	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+]")
 	assert.Equal(t, cfg.Session.DefaultCommand, "")
 	assert.DeepEqual(t, cfg.Session.ForwardEnv, []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"})
+	assert.Equal(t, cfg.Session.ResizePolicy, "smallest")
 }
 
 func TestLoadMissing(t *testing.T) {

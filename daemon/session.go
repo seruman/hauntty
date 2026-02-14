@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"sync"
@@ -21,6 +22,26 @@ var feedPool = sync.Pool{
 	},
 }
 
+type attachedClient struct {
+	conn   *protocol.Conn
+	close  func() error
+	cols   uint16
+	rows   uint16
+	xpixel uint16
+	ypixel uint16
+	outCh  chan []byte
+	done   chan struct{}
+}
+
+func (ac *attachedClient) writeLoop() {
+	for data := range ac.outCh {
+		if err := ac.conn.WriteMessage(&protocol.Output{Data: data}); err != nil {
+			break
+		}
+	}
+	close(ac.done)
+}
+
 type Session struct {
 	Name      string
 	Cols      uint16
@@ -28,17 +49,17 @@ type Session struct {
 	PID       uint32
 	CreatedAt time.Time
 
-	mu          sync.Mutex
-	ptmx        *os.File
-	cmd         *exec.Cmd
-	term        *wasm.Terminal
-	client      *protocol.Conn
-	clientClose func() error // closes the underlying net.Conn of the attached client
-	clientMu    sync.Mutex
-	feedCh      chan *[]byte
-	done        chan struct{}
-	exitCode    int32
-	tempDir     string
+	mu           sync.Mutex
+	ptmx         *os.File
+	cmd          *exec.Cmd
+	term         *wasm.Terminal
+	clients      []*attachedClient
+	clientMu     sync.Mutex
+	feedCh       chan *[]byte
+	done         chan struct{}
+	exitCode     int32
+	tempDir      string
+	resizePolicy string
 }
 
 func resolveCommand(command []string, env []string) []string {
@@ -56,7 +77,7 @@ func resolveCommand(command []string, env []string) []string {
 	return []string{"/bin/sh"}
 }
 
-func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
+func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, resizePolicy string) (*Session, error) {
 	command = resolveCommand(command, env)
 
 	shellArgs, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
@@ -94,17 +115,18 @@ func newSession(ctx context.Context, name string, command []string, env []string
 	}
 
 	s := &Session{
-		Name:      name,
-		Cols:      cols,
-		Rows:      rows,
-		PID:       uint32(cmd.Process.Pid),
-		CreatedAt: time.Now(),
-		ptmx:      ptmx,
-		cmd:       cmd,
-		term:      term,
-		feedCh:    make(chan *[]byte, 64),
-		done:      make(chan struct{}),
-		tempDir:   tempDir,
+		Name:         name,
+		Cols:         cols,
+		Rows:         rows,
+		PID:          uint32(cmd.Process.Pid),
+		CreatedAt:    time.Now(),
+		ptmx:         ptmx,
+		cmd:          cmd,
+		term:         term,
+		feedCh:       make(chan *[]byte, 64),
+		done:         make(chan struct{}),
+		tempDir:      tempDir,
+		resizePolicy: resizePolicy,
 	}
 
 	go s.feedLoop(ctx)
@@ -112,7 +134,7 @@ func newSession(ctx context.Context, name string, command []string, env []string
 	return s, nil
 }
 
-func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState) (*Session, error) {
+func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState, resizePolicy string) (*Session, error) {
 	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
 	if err != nil {
 		return nil, err
@@ -165,17 +187,18 @@ func restoreSession(ctx context.Context, name string, command []string, env []st
 	}
 
 	s := &Session{
-		Name:      name,
-		Cols:      cols,
-		Rows:      rows,
-		PID:       uint32(cmd.Process.Pid),
-		CreatedAt: time.Now(),
-		ptmx:      ptmx,
-		cmd:       cmd,
-		term:      term,
-		feedCh:    make(chan *[]byte, 64),
-		done:      make(chan struct{}),
-		tempDir:   tempDir,
+		Name:         name,
+		Cols:         cols,
+		Rows:         rows,
+		PID:          uint32(cmd.Process.Pid),
+		CreatedAt:    time.Now(),
+		ptmx:         ptmx,
+		cmd:          cmd,
+		term:         term,
+		feedCh:       make(chan *[]byte, 64),
+		done:         make(chan struct{}),
+		tempDir:      tempDir,
+		resizePolicy: resizePolicy,
 	}
 
 	go s.feedLoop(ctx)
@@ -193,27 +216,22 @@ func (s *Session) feedLoop(ctx context.Context) {
 	}
 }
 
-// Backpressure: readLoop blocks on both client writes (kernel socket
-// buffer) and WASM feeds (channel send), which blocks PTY reads,
-// which makes the child process block on write.
 func (s *Session) readLoop(ctx context.Context) {
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := s.ptmx.Read(buf)
 		if n > 0 {
-			// WriteMessage copies internally, so buf[:n] is safe to reuse.
+			data := make([]byte, n)
+			copy(data, buf[:n])
+
 			s.clientMu.Lock()
-			if s.client != nil {
-				if werr := s.client.WriteMessage(&protocol.Output{Data: buf[:n]}); werr != nil {
-					slog.Debug("client write error", "session", s.Name, "err", werr)
-				}
-			}
+			s.broadcastOutput(data)
 			s.clientMu.Unlock()
 
 			bp := feedPool.Get().(*[]byte)
-			data := (*bp)[:n]
-			copy(data, buf[:n])
-			*bp = data
+			feedData := (*bp)[:n]
+			copy(feedData, buf[:n])
+			*bp = feedData
 			s.feedCh <- bp
 		}
 		if err != nil {
@@ -228,21 +246,22 @@ func (s *Session) readLoop(ctx context.Context) {
 	}
 	close(s.done)
 
+	exitMsg := &protocol.Exited{ExitCode: s.exitCode}
 	s.clientMu.Lock()
-	if s.client != nil {
-		if err := s.client.WriteMessage(&protocol.Exited{ExitCode: s.exitCode}); err != nil {
-			slog.Debug("write exited notification", "session", s.Name, "err", err)
-		}
-	}
+	clients := s.clients
+	s.clients = nil
 	s.clientMu.Unlock()
+	for _, ac := range clients {
+		close(ac.outCh)
+		<-ac.done
+		ac.conn.WriteMessage(exitMsg)
+	}
 }
 
-func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16) error {
-	s.disconnectClient()
-
+func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16) (*attachedClient, error) {
 	dump, err := s.term.DumpScreen(context.Background(), wasm.DumpVTFull)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	err = conn.WriteMessage(&protocol.State{
 		ScreenDump:        dump.VT,
@@ -251,41 +270,112 @@ func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows
 		IsAlternateScreen: dump.IsAltScreen,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	s.clientMu.Lock()
-	s.client = conn
-	s.clientClose = closeConn
-	s.clientMu.Unlock()
-
-	if cols != s.Cols || rows != s.Rows {
-		s.resize(cols, rows, xpixel, ypixel)
+	ac := &attachedClient{
+		conn:   conn,
+		close:  closeConn,
+		cols:   cols,
+		rows:   rows,
+		xpixel: xpixel,
+		ypixel: ypixel,
+		outCh:  make(chan []byte, 64),
+		done:   make(chan struct{}),
 	}
+	go ac.writeLoop()
 
-	return nil
+	s.addClient(ac)
+	s.arbitrateResize()
+
+	return ac, nil
 }
 
-// detach clears the attached client without closing the connection.
-// Used when the same connection sends a DETACH message.
-func (s *Session) detach() {
-	s.clientMu.Lock()
-	s.client = nil
-	s.clientClose = nil
-	s.clientMu.Unlock()
+// detachClient removes a specific client without closing its net.Conn.
+func (s *Session) detachClient(ac *attachedClient) {
+	s.removeClient(ac)
+	s.arbitrateResize()
 }
 
-// disconnectClient clears the attached client AND closes the underlying
-// connection so the remote attach process unblocks. Used by "ht detach".
-func (s *Session) disconnectClient() {
+// disconnectAllClients removes all clients and closes their connections.
+func (s *Session) disconnectAllClients() {
 	s.clientMu.Lock()
-	closeFn := s.clientClose
-	s.client = nil
-	s.clientClose = nil
+	clients := s.clients
+	s.clients = nil
 	s.clientMu.Unlock()
-	if closeFn != nil {
-		closeFn()
+	for _, ac := range clients {
+		close(ac.outCh)
+		<-ac.done
+		ac.close()
 	}
+}
+
+func (s *Session) addClient(ac *attachedClient) {
+	s.clientMu.Lock()
+	s.clients = append(s.clients, ac)
+	count := uint16(len(s.clients))
+	s.clientMu.Unlock()
+	s.broadcastClientsChanged(count)
+}
+
+func (s *Session) removeClient(ac *attachedClient) {
+	s.clientMu.Lock()
+	found := false
+	for i, c := range s.clients {
+		if c == ac {
+			s.clients = append(s.clients[:i], s.clients[i+1:]...)
+			found = true
+			break
+		}
+	}
+	count := uint16(len(s.clients))
+	s.clientMu.Unlock()
+	if !found {
+		return
+	}
+	close(ac.outCh)
+	<-ac.done
+	s.broadcastClientsChanged(count)
+}
+
+// broadcastOutput sends output data to all clients' outCh channels.
+// Evicts clients whose channels are full. Must be called with clientMu held.
+func (s *Session) broadcastOutput(data []byte) {
+	var evict []*attachedClient
+	for _, ac := range s.clients {
+		select {
+		case ac.outCh <- data:
+		default:
+			evict = append(evict, ac)
+		}
+	}
+	for _, ac := range evict {
+		for i, c := range s.clients {
+			if c == ac {
+				s.clients = append(s.clients[:i], s.clients[i+1:]...)
+				break
+			}
+		}
+		slog.Debug("evicting slow client", "session", s.Name)
+		close(ac.outCh)
+		go func(ac *attachedClient) {
+			<-ac.done
+			ac.close()
+		}(ac)
+	}
+}
+
+func (s *Session) broadcastClientsChanged(count uint16) {
+	s.clientMu.Lock()
+	msg := &protocol.ClientsChanged{
+		Count: count,
+		Cols:  s.Cols,
+		Rows:  s.Rows,
+	}
+	for _, ac := range s.clients {
+		ac.conn.WriteMessage(msg)
+	}
+	s.clientMu.Unlock()
 }
 
 func (s *Session) kill() {
@@ -327,7 +417,48 @@ func (s *Session) isRunning() bool {
 	}
 }
 
+func (s *Session) arbitrateResize() {
+	s.clientMu.Lock()
+	if len(s.clients) == 0 {
+		s.clientMu.Unlock()
+		return
+	}
+	var cols, rows, xpixel, ypixel uint16
+	switch s.resizePolicy {
+	case "largest":
+		for _, c := range s.clients {
+			cols = max(cols, c.cols)
+			rows = max(rows, c.rows)
+			xpixel = max(xpixel, c.xpixel)
+			ypixel = max(ypixel, c.ypixel)
+		}
+	case "last":
+		last := s.clients[len(s.clients)-1]
+		cols, rows = last.cols, last.rows
+		xpixel, ypixel = last.xpixel, last.ypixel
+	case "first":
+		first := s.clients[0]
+		cols, rows = first.cols, first.rows
+		xpixel, ypixel = first.xpixel, first.ypixel
+	default: // "smallest"
+		cols, rows = math.MaxUint16, math.MaxUint16
+		xpixel, ypixel = math.MaxUint16, math.MaxUint16
+		for _, c := range s.clients {
+			cols = min(cols, c.cols)
+			rows = min(rows, c.rows)
+			xpixel = min(xpixel, c.xpixel)
+			ypixel = min(ypixel, c.ypixel)
+		}
+	}
+	s.clientMu.Unlock()
+
+	if cols != s.Cols || rows != s.Rows {
+		s.resize(cols, rows, xpixel, ypixel)
+	}
+}
+
 func (s *Session) close(ctx context.Context) {
+	s.disconnectAllClients()
 	s.kill()
 	<-s.done
 	s.ptmx.Close()

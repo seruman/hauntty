@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	ProtocolVersion uint8  = 3
+	ProtocolVersion uint8  = 4
 	maxFrameSize    uint32 = 16 << 20 // 16MB
 )
 
@@ -134,6 +134,8 @@ func newMessage(t uint8) (Message, error) {
 		return &DumpResponse{}, nil
 	case TypePruneResponse:
 		return &PruneResponse{}, nil
+	case TypeClientsChanged:
+		return &ClientsChanged{}, nil
 	default:
 		return nil, fmt.Errorf("unknown message type: 0x%02x", t)
 	}

@@ -30,6 +30,7 @@ type ClientConfig struct {
 type SessionConfig struct {
 	DefaultCommand string   `toml:"default_command"`
 	ForwardEnv     []string `toml:"forward_env"`
+	ResizePolicy   string   `toml:"resize_policy"`
 }
 
 func Default() *Config {
@@ -43,7 +44,8 @@ func Default() *Config {
 			DetachKeybind: "ctrl+]",
 		},
 		Session: SessionConfig{
-			ForwardEnv: []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},
+			ForwardEnv:   []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},
+			ResizePolicy: "smallest",
 		},
 	}
 }
@@ -86,6 +88,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Session.ForwardEnv == nil {
 		cfg.Session.ForwardEnv = d.Session.ForwardEnv
+	}
+	if cfg.Session.ResizePolicy == "" {
+		cfg.Session.ResizePolicy = d.Session.ResizePolicy
 	}
 }
 

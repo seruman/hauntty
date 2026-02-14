@@ -191,6 +191,8 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			fmt.Fprintf(os.Stderr, "[hauntty] error: %s\n", m.Message)
 			exitCode = 1
 			return true
+		case *protocol.ClientsChanged:
+			_ = m // informational, no action needed
 		}
 		return false
 	}

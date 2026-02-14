@@ -20,3 +20,7 @@ func SocketPath() string {
 func PIDPath() string {
 	return filepath.Join(socketDir(), "hauntty.pid")
 }
+
+func LogPath(pid int) string {
+	return filepath.Join(socketDir(), fmt.Sprintf("hauntty-server-%d.log", pid))
+}
