@@ -463,7 +463,13 @@ func (s *Session) arbitrateResize() {
 func (s *Session) close(ctx context.Context) {
 	s.disconnectAllClients()
 	s.kill()
-	<-s.done
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		slog.Warn("child ignored SIGHUP, sending SIGKILL", "session", s.Name)
+		syscall.Kill(-int(s.PID), syscall.SIGKILL)
+		<-s.done
+	}
 	s.ptmx.Close()
 	s.term.Close(ctx)
 	if s.tempDir != "" {
