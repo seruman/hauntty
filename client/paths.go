@@ -1,32 +1,16 @@
 package client
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/selman/hauntty/protocol"
 )
 
-func socketDir() string {
-	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "hauntty")
-	}
-	tmpdir := os.TempDir()
-	return filepath.Join(tmpdir, fmt.Sprintf("hauntty-%d", os.Getuid()))
-}
-
-func SocketPath() string {
-	return filepath.Join(socketDir(), "hauntty.sock")
-}
-
-func PIDPath() string {
-	return filepath.Join(socketDir(), "hauntty.pid")
-}
-
 func DaemonRunning() bool {
-	data, err := os.ReadFile(PIDPath())
+	data, err := os.ReadFile(protocol.PIDPath())
 	if err != nil {
 		return false
 	}

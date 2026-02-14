@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -33,6 +34,7 @@ type Server struct {
 	persister         *Persister
 	defaultScrollback uint32
 	autoExit          bool
+	shutdownOnce      sync.Once
 }
 
 func New(ctx context.Context, cfg *config.DaemonConfig) (*Server, error) {
@@ -43,8 +45,8 @@ func New(ctx context.Context, cfg *config.DaemonConfig) (*Server, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
-		socketPath:        SocketPath(),
-		pidPath:           PIDPath(),
+		socketPath:        protocol.SocketPath(),
+		pidPath:           protocol.PIDPath(),
 		sessions:          make(map[string]*Session),
 		wasmRT:            rt,
 		ctx:               ctx,
@@ -64,7 +66,7 @@ func New(ctx context.Context, cfg *config.DaemonConfig) (*Server, error) {
 func (s *Server) Listen() error {
 	CleanStaleTmp()
 
-	dir := socketDir()
+	dir := filepath.Dir(s.socketPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create socket dir: %w", err)
 	}
@@ -195,7 +197,9 @@ func (s *Server) handleConn(netConn net.Conn) {
 			}
 			if target != nil {
 				target.disconnectClient()
-				attached = nil
+				if target == attached {
+					attached = nil
+				}
 			}
 		case *protocol.List:
 			s.handleList(conn)
@@ -220,6 +224,8 @@ func (s *Server) handleConn(netConn net.Conn) {
 
 func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach) (*Session, error) {
 	name := msg.Name
+
+	s.mu.RLock()
 	if name == "" {
 		existing := make(map[string]bool, len(s.sessions))
 		for k := range s.sessions {
@@ -227,16 +233,16 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		}
 		name = namegen.GenerateUnique(existing)
 	}
+	sess := s.sessions[name]
+	s.mu.RUnlock()
 
-	s.mu.Lock()
-	sess, exists := s.sessions[name]
-	if !exists {
+	created := false
+	if sess == nil {
 		scrollback := msg.ScrollbackLines
 		if scrollback == 0 {
 			scrollback = s.defaultScrollback
 		}
 
-		// Check for a persisted dead session to restore.
 		var err error
 		if state, serr := LoadState(name); serr == nil {
 			slog.Info("restoring dead session", "session", name)
@@ -249,36 +255,46 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, scrollback, s.wasmRT)
 		}
 		if err != nil {
-			s.mu.Unlock()
 			if werr := conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()}); werr != nil {
 				slog.Debug("write error response", "err", werr)
 			}
 			return nil, err
 		}
-		s.sessions[name] = sess
 
-		go func() {
-			<-sess.done
-			s.mu.Lock()
-			delete(s.sessions, name)
-			empty := len(s.sessions) == 0
+		// Check-and-insert: another goroutine may have raced us for the
+		// same auto-generated name. If so, close our duplicate and use
+		// the winner's session. This wastes a PTY+WASM init but avoids
+		// holding mu across the heavy creation path.
+		s.mu.Lock()
+		if existing, ok := s.sessions[name]; ok {
 			s.mu.Unlock()
-			CleanState(name)
-			if s.autoExit && empty {
-				slog.Info("auto-exit: last session ended, shutting down")
-				s.Shutdown()
-			}
-		}()
+			sess.close(s.ctx)
+			sess = existing
+		} else {
+			s.sessions[name] = sess
+			created = true
+			go func() {
+				<-sess.done
+				s.mu.Lock()
+				delete(s.sessions, name)
+				empty := len(s.sessions) == 0
+				s.mu.Unlock()
+				CleanState(name)
+				if s.autoExit && empty {
+					slog.Info("auto-exit: last session ended, shutting down")
+					s.Shutdown()
+				}
+			}()
+			s.mu.Unlock()
+		}
 	}
-	s.mu.Unlock()
 
-	// Send OK before state dump.
 	err := conn.WriteMessage(&protocol.OK{
 		SessionName: sess.Name,
 		Cols:        sess.Cols,
 		Rows:        sess.Rows,
 		PID:         sess.PID,
-		Created:     !exists,
+		Created:     created,
 	})
 	if err != nil {
 		return nil, err
@@ -466,6 +482,10 @@ func (s *Server) handlePrune(conn *protocol.Conn) {
 }
 
 func (s *Server) Shutdown() {
+	s.shutdownOnce.Do(s.shutdown)
+}
+
+func (s *Server) shutdown() {
 	if s.persister != nil {
 		s.persister.Stop()
 		s.persister.saveAll()

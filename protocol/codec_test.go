@@ -81,62 +81,65 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestHandshakeSuccess(t *testing.T) {
-	clientBuf := &bytes.Buffer{}
-	serverBuf := &bytes.Buffer{}
+func TestHandshake(t *testing.T) {
+	cr, sw := io.Pipe()
+	sr, cw := io.Pipe()
 
-	// Client writes version to clientBuf.
-	client := NewConn(clientBuf)
-	enc := NewEncoder(clientBuf)
-	err := enc.WriteU8(ProtocolVersion)
-	assert.NilError(t, err)
+	clientConn := NewConn(struct {
+		io.Reader
+		io.Writer
+	}{cr, cw})
+	serverConn := NewConn(struct {
+		io.Reader
+		io.Writer
+	}{sr, sw})
 
-	// Server reads from clientBuf.
-	_ = client // suppress unused
-	server := NewConn(clientBuf)
-	version, err := server.AcceptHandshake()
-	assert.NilError(t, err)
-	assert.Equal(t, version, ProtocolVersion)
+	var serverVer uint8
+	var serverErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serverVer, serverErr = serverConn.AcceptHandshake()
+		if serverErr == nil {
+			serverErr = serverConn.AcceptVersion(serverVer)
+		}
+	}()
 
-	// Server writes accepted version to serverBuf.
-	serverConn := NewConn(serverBuf)
-	err = serverConn.AcceptVersion(version)
-	assert.NilError(t, err)
-
-	// Client reads accepted version from serverBuf.
-	clientConn := NewConn(serverBuf)
-	dec := NewDecoder(serverBuf)
-	_ = clientConn
-	accepted, err := dec.ReadU8()
+	accepted, err := clientConn.Handshake(ProtocolVersion)
 	assert.NilError(t, err)
 	assert.Equal(t, accepted, ProtocolVersion)
+
+	<-done
+	assert.NilError(t, serverErr)
+	assert.Equal(t, serverVer, ProtocolVersion)
 }
 
-func TestHandshakeRoundTrip(t *testing.T) {
-	wire := &bytes.Buffer{}
+func TestHandshakeVersionMismatch(t *testing.T) {
+	cr, sw := io.Pipe()
+	sr, cw := io.Pipe()
 
-	// Client side: send version.
-	clientConn := NewConn(wire)
-	enc := NewEncoder(wire)
-	err := enc.WriteU8(ProtocolVersion)
-	assert.NilError(t, err)
+	clientConn := NewConn(struct {
+		io.Reader
+		io.Writer
+	}{cr, cw})
+	serverConn := NewConn(struct {
+		io.Reader
+		io.Writer
+	}{sr, sw})
 
-	// Server side: read version.
-	_ = clientConn
-	serverConn := NewConn(wire)
-	version, err := serverConn.AcceptHandshake()
-	assert.NilError(t, err)
-	assert.Equal(t, version, ProtocolVersion)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = serverConn.AcceptHandshake()
+		// Reject: send version 0.
+		serverConn.AcceptVersion(0)
+	}()
 
-	// Server writes accepted version back to wire.
-	err = serverConn.AcceptVersion(version)
+	accepted, err := clientConn.Handshake(ProtocolVersion)
 	assert.NilError(t, err)
+	assert.Equal(t, accepted, uint8(0))
 
-	// Client reads accepted version.
-	dec := NewDecoder(wire)
-	accepted, err := dec.ReadU8()
-	assert.NilError(t, err)
-	assert.Equal(t, accepted, ProtocolVersion)
+	<-done
 }
 
 func TestUnknownMessageType(t *testing.T) {
@@ -149,7 +152,7 @@ func TestUnknownMessageType(t *testing.T) {
 
 	c := NewConn(&buf)
 	_, err = c.ReadMessage()
-	assert.Assert(t, err != nil)
+	assert.Error(t, err, "unknown message type: 0xff")
 }
 
 func TestTruncatedFrame(t *testing.T) {
@@ -161,7 +164,7 @@ func TestTruncatedFrame(t *testing.T) {
 
 	c := NewConn(&buf)
 	_, err = c.ReadMessage()
-	assert.Assert(t, err != nil)
+	assert.Error(t, err, "unexpected EOF")
 }
 
 func TestEmptyFrame(t *testing.T) {
@@ -172,14 +175,14 @@ func TestEmptyFrame(t *testing.T) {
 
 	c := NewConn(&buf)
 	_, err = c.ReadMessage()
-	assert.Assert(t, err != nil)
+	assert.Error(t, err, "empty message frame")
 }
 
 func TestReadMessageEOF(t *testing.T) {
 	buf := &bytes.Buffer{}
 	c := NewConn(buf)
 	_, err := c.ReadMessage()
-	assert.Assert(t, err == io.EOF || err == io.ErrUnexpectedEOF)
+	assert.Error(t, err, "EOF")
 }
 
 func TestLargePayload(t *testing.T) {

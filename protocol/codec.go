@@ -6,7 +6,10 @@ import (
 	"io"
 )
 
-const ProtocolVersion uint8 = 1
+const (
+	ProtocolVersion uint8  = 1
+	maxFrameSize    uint32 = 16 << 20 // 16MB
+)
 
 type Conn struct {
 	rw io.ReadWriter
@@ -46,6 +49,9 @@ func (c *Conn) ReadMessage() (Message, error) {
 	}
 	if length == 0 {
 		return nil, fmt.Errorf("empty message frame")
+	}
+	if length > maxFrameSize {
+		return nil, fmt.Errorf("message frame too large: %d bytes", length)
 	}
 
 	// Read entire frame into buffer to prevent over-reading from the stream.

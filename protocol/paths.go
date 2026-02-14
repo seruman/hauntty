@@ -1,4 +1,4 @@
-package daemon
+package protocol
 
 import (
 	"fmt"
@@ -10,8 +10,7 @@ func socketDir() string {
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
 		return filepath.Join(dir, "hauntty")
 	}
-	tmpdir := os.TempDir()
-	return filepath.Join(tmpdir, fmt.Sprintf("hauntty-%d", os.Getuid()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("hauntty-%d", os.Getuid()))
 }
 
 func SocketPath() string {

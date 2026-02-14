@@ -290,7 +290,7 @@ func ensureDaemon() error {
 	}
 	cmd.Process.Release()
 
-	sock := client.SocketPath()
+	sock := protocol.SocketPath()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(sock); err == nil {

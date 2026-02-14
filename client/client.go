@@ -13,7 +13,7 @@ type Client struct {
 }
 
 func Connect() (*Client, error) {
-	sock := SocketPath()
+	sock := protocol.SocketPath()
 	nc, err := net.Dial("unix", sock)
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w", err)

@@ -14,6 +14,13 @@ import (
 	"github.com/selman/hauntty/wasm"
 )
 
+var feedPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
 type Session struct {
 	Name      string
 	Cols      uint16
@@ -28,27 +35,29 @@ type Session struct {
 	client      *protocol.Conn
 	clientClose func() error // closes the underlying net.Conn of the attached client
 	clientMu    sync.Mutex
-	feedCh      chan []byte
+	feedCh      chan *[]byte
 	done        chan struct{}
 	exitCode    int32
 	tempDir     string
 }
 
-func newSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
-	if command == "" {
-		for _, e := range env {
-			if len(e) > 6 && e[:6] == "SHELL=" {
-				command = e[6:]
-				break
-			}
-		}
-		if command == "" {
-			command = os.Getenv("SHELL")
-		}
-		if command == "" {
-			command = "/bin/sh"
+func resolveCommand(command string, env []string) string {
+	if command != "" {
+		return command
+	}
+	for _, e := range env {
+		if len(e) > 6 && e[:6] == "SHELL=" {
+			return e[6:]
 		}
 	}
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell
+	}
+	return "/bin/sh"
+}
+
+func newSession(ctx context.Context, name, command string, env []string, cols, rows uint16, scrollback uint32, wasmRT *wasm.Runtime) (*Session, error) {
+	command = resolveCommand(command, env)
 
 	shellCmd, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
 	if err != nil {
@@ -93,7 +102,7 @@ func newSession(ctx context.Context, name, command string, env []string, cols, r
 		ptmx:      ptmx,
 		cmd:       cmd,
 		term:      term,
-		feedCh:    make(chan []byte, 64),
+		feedCh:    make(chan *[]byte, 64),
 		done:      make(chan struct{}),
 		tempDir:   tempDir,
 	}
@@ -127,20 +136,7 @@ func restoreSession(ctx context.Context, name, command string, env []string, col
 		return nil, err
 	}
 
-	if command == "" {
-		for _, e := range env {
-			if len(e) > 6 && e[:6] == "SHELL=" {
-				command = e[6:]
-				break
-			}
-		}
-		if command == "" {
-			command = os.Getenv("SHELL")
-		}
-		if command == "" {
-			command = "/bin/sh"
-		}
-	}
+	command = resolveCommand(command, env)
 
 	shellCmd, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
 	if err != nil {
@@ -177,7 +173,7 @@ func restoreSession(ctx context.Context, name, command string, env []string, col
 		ptmx:      ptmx,
 		cmd:       cmd,
 		term:      term,
-		feedCh:    make(chan []byte, 64),
+		feedCh:    make(chan *[]byte, 64),
 		done:      make(chan struct{}),
 		tempDir:   tempDir,
 	}
@@ -187,19 +183,19 @@ func restoreSession(ctx context.Context, name, command string, env []string, col
 	return s, nil
 }
 
-// Runs in its own goroutine so WASM processing never blocks the client path.
 func (s *Session) feedLoop(ctx context.Context) {
-	for data := range s.feedCh {
-		if err := s.term.Feed(ctx, data); err != nil {
+	for bp := range s.feedCh {
+		if err := s.term.Feed(ctx, *bp); err != nil {
 			slog.Debug("wasm feed error", "session", s.Name, "err", err)
 		}
+		*bp = (*bp)[:cap(*bp)]
+		feedPool.Put(bp)
 	}
 }
 
-// Backpressure: WriteMessage calls net.Conn.Write synchronously. When the
-// kernel socket send buffer is full, Write blocks, which blocks readLoop,
-// which blocks PTY reads, which makes the child process block on write —
-// natural end-to-end flow control with no extra code needed.
+// Backpressure: readLoop blocks on both client writes (kernel socket
+// buffer) and WASM feeds (channel send), which blocks PTY reads,
+// which makes the child process block on write.
 func (s *Session) readLoop(ctx context.Context) {
 	buf := make([]byte, 32*1024)
 	for {
@@ -214,14 +210,11 @@ func (s *Session) readLoop(ctx context.Context) {
 			}
 			s.clientMu.Unlock()
 
-			// Copy needed: feedLoop consumes asynchronously after buf is reused.
-			data := make([]byte, n)
+			bp := feedPool.Get().(*[]byte)
+			data := (*bp)[:n]
 			copy(data, buf[:n])
-			select {
-			case s.feedCh <- data:
-			default:
-				slog.Debug("wasm feed channel full, dropping", "session", s.Name)
-			}
+			*bp = data
+			s.feedCh <- bp
 		}
 		if err != nil {
 			break

@@ -267,6 +267,10 @@ func stateDir() string {
 	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
 		return filepath.Join(dir, "hauntty", "sessions")
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("cannot determine home directory, using temp dir for state", "err", err)
+		home = os.TempDir()
+	}
 	return filepath.Join(home, ".local", "state", "hauntty", "sessions")
 }

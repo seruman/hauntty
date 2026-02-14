@@ -87,19 +87,19 @@ func TestAltScreen(t *testing.T) {
 
 	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
 	assert.NilError(t, err)
-	assert.Assert(t, !dump.IsAltScreen)
+	assert.Equal(t, dump.IsAltScreen, false)
 
 	err = term.Feed(ctx, []byte("\x1b[?1049h"))
 	assert.NilError(t, err)
 	dump, err = term.DumpScreen(ctx, wasm.DumpVTFull)
 	assert.NilError(t, err)
-	assert.Assert(t, dump.IsAltScreen)
+	assert.Equal(t, dump.IsAltScreen, true)
 
 	err = term.Feed(ctx, []byte("\x1b[?1049l"))
 	assert.NilError(t, err)
 	dump, err = term.DumpScreen(ctx, wasm.DumpVTFull)
 	assert.NilError(t, err)
-	assert.Assert(t, !dump.IsAltScreen)
+	assert.Equal(t, dump.IsAltScreen, false)
 }
 
 func TestMultipleTerminals(t *testing.T) {
