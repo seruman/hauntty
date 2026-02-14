@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -27,6 +28,7 @@ type CLI struct {
 	Send   SendCmd   `cmd:"" help:"Send input to a session."`
 	Dump   DumpCmd   `cmd:"" help:"Dump session contents."`
 	Detach DetachCmd `cmd:"" help:"Detach from current session."`
+	Wait   WaitCmd   `cmd:"" help:"Wait for session output to match a pattern."`
 	Prune  PruneCmd  `cmd:"" help:"Delete dead session state files."`
 	Config ConfigCmd `cmd:"" help:"Print effective configuration."`
 	Daemon DaemonCmd `cmd:"" help:"Start daemon in foreground."`
@@ -224,6 +226,64 @@ func (cmd *DetachCmd) Run() error {
 	defer c.Close()
 
 	return c.DetachSession(sessionName)
+}
+
+type WaitCmd struct {
+	Name     string `arg:"" help:"Session name."`
+	Pattern  string `arg:"" help:"Pattern to match."`
+	Regex    bool   `short:"e" help:"Use regex matching."`
+	Timeout  int    `short:"t" default:"30000" help:"Timeout in milliseconds."`
+	Row      int    `default:"-1" help:"Only check specific row (0-indexed)."`
+	Interval int    `default:"100" help:"Poll interval in milliseconds."`
+}
+
+func (cmd *WaitCmd) Run() error {
+	var match func(string) bool
+	if cmd.Regex {
+		re, err := regexp.Compile(cmd.Pattern)
+		if err != nil {
+			return fmt.Errorf("invalid regex: %w", err)
+		}
+		match = re.MatchString
+	} else {
+		match = func(s string) bool { return strings.Contains(s, cmd.Pattern) }
+	}
+
+	c, err := client.Connect()
+	if err != nil {
+		os.Exit(2)
+	}
+	defer c.Close()
+
+	deadline := time.Now().Add(time.Duration(cmd.Timeout) * time.Millisecond)
+	for {
+		data, err := c.Dump(cmd.Name, protocol.DumpPlain)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(2)
+		}
+
+		content := string(data)
+		if cmd.Row >= 0 {
+			lines := strings.Split(content, "\n")
+			if cmd.Row < len(lines) {
+				content = lines[cmd.Row]
+			} else {
+				content = ""
+			}
+		}
+
+		if match(content) {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			fmt.Fprintf(os.Stderr, "timeout waiting for %q\n", cmd.Pattern)
+			os.Exit(1)
+		}
+
+		time.Sleep(time.Duration(cmd.Interval) * time.Millisecond)
+	}
 }
 
 type PruneCmd struct{}
