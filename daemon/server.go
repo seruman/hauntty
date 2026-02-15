@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -299,10 +300,11 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		}
 	}
 
+	cols, rows := sess.size()
 	err := conn.WriteMessage(&protocol.OK{
 		SessionName: sess.Name,
-		Cols:        sess.Cols,
-		Rows:        sess.Rows,
+		Cols:        cols,
+		Rows:        rows,
 		PID:         sess.PID,
 		Created:     created,
 	})
@@ -310,7 +312,7 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		return nil, nil, err
 	}
 
-	ac, aerr := sess.attach(conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel)
+	ac, aerr := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel)
 	if aerr != nil {
 		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: aerr.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
@@ -322,6 +324,9 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 }
 
 func (s *Server) handleList(conn *protocol.Conn) {
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	defer cancel()
+
 	s.mu.RLock()
 	running := make(map[string]bool, len(s.sessions))
 	sessions := make([]protocol.Session, 0, len(s.sessions))
@@ -331,14 +336,15 @@ func (s *Server) handleList(conn *protocol.Conn) {
 		if !sess.isRunning() {
 			state = "dead"
 		}
+		cols, rows := sess.size()
 		sessions = append(sessions, protocol.Session{
 			Name:      sess.Name,
 			State:     state,
-			Cols:      sess.Cols,
-			Rows:      sess.Rows,
+			Cols:      cols,
+			Rows:      rows,
 			PID:       sess.PID,
 			CreatedAt: uint32(sess.CreatedAt.Unix()),
-			CWD:       sess.term.GetPwd(context.Background()),
+			CWD:       sess.term.GetPwd(ctx),
 		})
 	}
 	s.mu.RUnlock()
@@ -494,7 +500,36 @@ func (s *Server) handlePrune(conn *protocol.Conn) {
 }
 
 func (s *Server) handleStatus(conn *protocol.Conn, msg *protocol.Status) {
+	running, runningCount, deadCount, ss := s.statusSnapshot(msg.SessionName)
+
+	dead, _ := ListDeadSessions(running)
+	deadCount += uint32(len(dead))
+
+	uptime := max(time.Since(s.startedAt), 0)
+	uptimeSec := min(int64(uptime/time.Second), math.MaxUint32)
+
+	resp := &protocol.StatusResponse{
+		Daemon: protocol.DaemonStatus{
+			PID:          uint32(os.Getpid()),
+			Uptime:       uint32(uptimeSec),
+			SocketPath:   s.socketPath,
+			RunningCount: runningCount,
+			DeadCount:    deadCount,
+		},
+		Session: ss,
+	}
+	if err := conn.WriteMessage(resp); err != nil {
+		slog.Debug("write status response", "err", err)
+	}
+}
+
+func (s *Server) statusSnapshot(sessionName string) (map[string]bool, uint32, uint32, *protocol.SessionStatus) {
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	defer cancel()
+
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	running := make(map[string]bool, len(s.sessions))
 	var runningCount uint32
 	var deadCount uint32
@@ -507,45 +542,34 @@ func (s *Server) handleStatus(conn *protocol.Conn, msg *protocol.Status) {
 		}
 	}
 
-	var ss *protocol.SessionStatus
-	if msg.SessionName != "" {
-		if sess, ok := s.sessions[msg.SessionName]; ok {
-			state := "running"
-			if !sess.isRunning() {
-				state = "dead"
-			}
-			sess.clientMu.Lock()
-			clientCount := uint32(len(sess.clients))
-			sess.clientMu.Unlock()
-			ss = &protocol.SessionStatus{
-				Name:        sess.Name,
-				State:       state,
-				Cols:        sess.Cols,
-				Rows:        sess.Rows,
-				PID:         sess.PID,
-				CWD:         sess.term.GetPwd(context.Background()),
-				ClientCount: clientCount,
-			}
-		}
+	if sessionName == "" {
+		return running, runningCount, deadCount, nil
 	}
-	s.mu.RUnlock()
+	sess, ok := s.sessions[sessionName]
+	if !ok {
+		return running, runningCount, deadCount, nil
+	}
 
-	dead, _ := ListDeadSessions(running)
-	deadCount += uint32(len(dead))
+	state := "running"
+	if !sess.isRunning() {
+		state = "dead"
+	}
 
-	resp := &protocol.StatusResponse{
-		Daemon: protocol.DaemonStatus{
-			PID:          uint32(os.Getpid()),
-			Uptime:       uint32(time.Since(s.startedAt).Seconds()),
-			SocketPath:   s.socketPath,
-			RunningCount: runningCount,
-			DeadCount:    deadCount,
-		},
-		Session: ss,
+	sess.clientMu.Lock()
+	clientCount := uint32(len(sess.clients))
+	sess.clientMu.Unlock()
+
+	cols, rows := sess.size()
+	ss := &protocol.SessionStatus{
+		Name:        sess.Name,
+		State:       state,
+		Cols:        cols,
+		Rows:        rows,
+		PID:         sess.PID,
+		CWD:         sess.term.GetPwd(ctx),
+		ClientCount: clientCount,
 	}
-	if err := conn.WriteMessage(resp); err != nil {
-		slog.Debug("write status response", "err", err)
-	}
+	return running, runningCount, deadCount, ss
 }
 
 func (s *Server) Shutdown() {

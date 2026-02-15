@@ -261,8 +261,8 @@ func (s *Session) readLoop(ctx context.Context) {
 	}
 }
 
-func (s *Session) attach(conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16) (*attachedClient, error) {
-	dump, err := s.term.DumpScreen(context.Background(), wasm.DumpVTFull)
+func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16) (*attachedClient, error) {
+	dump, err := s.term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		return nil, err
 	}
@@ -369,11 +369,12 @@ func (s *Session) broadcastOutput(data []byte) {
 }
 
 func (s *Session) broadcastClientsChanged(count uint16) {
+	cols, rows := s.size()
 	s.clientMu.Lock()
 	msg := &protocol.ClientsChanged{
 		Count: count,
-		Cols:  s.Cols,
-		Rows:  s.Rows,
+		Cols:  cols,
+		Rows:  rows,
 	}
 	for _, ac := range s.clients {
 		ac.conn.WriteMessage(msg)
@@ -390,7 +391,13 @@ func (s *Session) sendInput(data []byte) error {
 	return err
 }
 
-func (s *Session) resize(cols, rows, xpixel, ypixel uint16) error {
+func (s *Session) size() (uint16, uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Cols, s.Rows
+}
+
+func (s *Session) resize(ctx context.Context, cols, rows, xpixel, ypixel uint16) error {
 	s.mu.Lock()
 	s.Cols = cols
 	s.Rows = rows
@@ -401,7 +408,7 @@ func (s *Session) resize(cols, rows, xpixel, ypixel uint16) error {
 		return err
 	}
 	syscall.Kill(-int(s.PID), syscall.SIGWINCH)
-	if rerr := s.term.Resize(context.Background(), uint32(cols), uint32(rows)); rerr != nil {
+	if rerr := s.term.Resize(ctx, uint32(cols), uint32(rows)); rerr != nil {
 		slog.Warn("wasm resize", "session", s.Name, "err", rerr)
 	}
 	return nil
@@ -455,8 +462,9 @@ func (s *Session) arbitrateResize() {
 	}
 	s.clientMu.Unlock()
 
-	if cols != s.Cols || rows != s.Rows {
-		s.resize(cols, rows, xpixel, ypixel)
+	curCols, curRows := s.size()
+	if cols != curCols || rows != curRows {
+		s.resize(context.Background(), cols, rows, xpixel, ypixel)
 	}
 }
 

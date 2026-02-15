@@ -87,9 +87,10 @@ func (p *Persister) SaveSession(name string, s *Session) error {
 		return fmt.Errorf("persist: dump screen: %w", err)
 	}
 
+	cols, rows := s.size()
 	state := &SessionState{
-		Cols:        s.Cols,
-		Rows:        s.Rows,
+		Cols:        cols,
+		Rows:        rows,
 		CursorRow:   dump.CursorRow,
 		CursorCol:   dump.CursorCol,
 		IsAltScreen: dump.IsAltScreen,
