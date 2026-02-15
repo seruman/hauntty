@@ -256,13 +256,13 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		var err error
 		if state, serr := LoadState(name); serr == nil {
 			slog.Info("restoring dead session", "session", name)
-			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, state, s.resizePolicy)
+			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, state, s.resizePolicy, msg.CWD)
 			if err == nil {
 				CleanState(name)
 			}
 		}
 		if sess == nil {
-			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, s.resizePolicy)
+			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, s.resizePolicy, msg.CWD)
 		}
 		if err != nil {
 			if werr := conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()}); werr != nil {

@@ -77,7 +77,7 @@ func resolveCommand(command []string, env []string) []string {
 	return []string{"/bin/sh"}
 }
 
-func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, resizePolicy string) (*Session, error) {
+func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, resizePolicy string, cwd string) (*Session, error) {
 	env = mergeEnv(os.Environ(), env)
 	command = resolveCommand(command, env)
 
@@ -90,6 +90,9 @@ func newSession(ctx context.Context, name string, command []string, env []string
 
 	cmd := exec.Command(shellArgs[0], shellArgs[1:]...)
 	cmd.Env = shellEnv
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
 
 	ws := &pty.Winsize{Rows: rows, Cols: cols, X: xpixel, Y: ypixel}
 	ptmx, err := pty.StartWithSize(cmd, ws)
@@ -135,7 +138,7 @@ func newSession(ctx context.Context, name string, command []string, env []string
 	return s, nil
 }
 
-func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState, resizePolicy string) (*Session, error) {
+func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState, resizePolicy string, cwd string) (*Session, error) {
 	env = mergeEnv(os.Environ(), env)
 
 	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
@@ -172,6 +175,9 @@ func restoreSession(ctx context.Context, name string, command []string, env []st
 
 	cmd := exec.Command(shellArgs[0], shellArgs[1:]...)
 	cmd.Env = shellEnv
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
 
 	ws := &pty.Winsize{Rows: rows, Cols: cols, X: xpixel, Y: ypixel}
 	ptmx, err := pty.StartWithSize(cmd, ws)

@@ -54,6 +54,7 @@ type Attach struct {
 	Command         []string
 	Env             []string
 	ScrollbackLines uint32
+	CWD             string
 }
 
 func (m *Attach) Type() uint8 { return TypeAttach }
@@ -90,7 +91,10 @@ func (m *Attach) encode(e *Encoder) error {
 			return err
 		}
 	}
-	return e.WriteU32(m.ScrollbackLines)
+	if err := e.WriteU32(m.ScrollbackLines); err != nil {
+		return err
+	}
+	return e.WriteString(m.CWD)
 }
 
 func (m *Attach) decode(d *Decoder) error {
@@ -130,7 +134,10 @@ func (m *Attach) decode(d *Decoder) error {
 			return err
 		}
 	}
-	m.ScrollbackLines, err = d.ReadU32()
+	if m.ScrollbackLines, err = d.ReadU32(); err != nil {
+		return err
+	}
+	m.CWD, err = d.ReadString()
 	return err
 }
 

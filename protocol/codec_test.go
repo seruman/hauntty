@@ -22,6 +22,7 @@ func TestRoundTrip(t *testing.T) {
 			Command:         []string{"/bin/bash"},
 			Env:             []string{"TERM=xterm-256color", "HOME=/home/user"},
 			ScrollbackLines: 10000,
+			CWD:             "/home/user/project",
 		}},
 		{"AttachEmptyEnv", &Attach{
 			Name:    "s",
@@ -256,7 +257,7 @@ func TestMultipleMessages(t *testing.T) {
 	c := NewConn(&buf)
 
 	msgs := []Message{
-		&Attach{Name: "s1", Cols: 80, Rows: 24, Command: []string{"bash"}, Env: []string{"A=1"}, ScrollbackLines: 1000},
+		&Attach{Name: "s1", Cols: 80, Rows: 24, Command: []string{"bash"}, Env: []string{"A=1"}, ScrollbackLines: 1000, CWD: "/tmp"},
 		&Input{Data: []byte("ls\n")},
 		&Output{Data: []byte("file1\nfile2\n")},
 		&Resize{Cols: 100, Rows: 50, Xpixel: 1600, Ypixel: 800},

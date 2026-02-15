@@ -61,7 +61,9 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 
 	env := collectEnv(forwardEnv)
 
-	ok, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000)
+	cwd, _ := os.Getwd()
+
+	ok, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd)
 	if err != nil {
 		return err
 	}

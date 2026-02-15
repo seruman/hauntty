@@ -46,7 +46,7 @@ func (c *Client) WriteMessage(msg protocol.Message) error {
 	return c.conn.WriteMessage(msg)
 }
 
-func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command []string, env []string, scrollback uint32) (*protocol.OK, error) {
+func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command []string, env []string, scrollback uint32, cwd string) (*protocol.OK, error) {
 	err := c.conn.WriteMessage(&protocol.Attach{
 		Name:            name,
 		Cols:            cols,
@@ -56,6 +56,7 @@ func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command 
 		Command:         command,
 		Env:             env,
 		ScrollbackLines: scrollback,
+		CWD:             cwd,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("send attach: %w", err)
