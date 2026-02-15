@@ -4,7 +4,7 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GHOSTTY_DIR="$ROOT/x/ghostty"
 GHOSTTY_REV="1576a09b0169b437b454067f9b10750d9efea9e0"
-PATCH="$ROOT/vt/ghostty.patch"
+PATCH_DIR="$ROOT/vt"
 
 # Clone or verify Ghostty at pinned commit.
 if [ -d "$GHOSTTY_DIR/.git" ]; then
@@ -21,10 +21,13 @@ else
     git -C "$GHOSTTY_DIR" checkout FETCH_HEAD
 fi
 
-# Apply patch (idempotent — skips if already applied).
-if git -C "$GHOSTTY_DIR" apply --check "$PATCH" 2>/dev/null; then
-    git -C "$GHOSTTY_DIR" apply "$PATCH"
-fi
+# Apply patches one by one (idempotent — skips if already applied).
+for patch in "$PATCH_DIR"/ghostty*.patch; do
+    [ -f "$patch" ] || continue
+    if git -C "$GHOSTTY_DIR" apply --check "$patch" 2>/dev/null; then
+        git -C "$GHOSTTY_DIR" apply "$patch"
+    fi
+done
 
 # Build WASM.
 cd "$ROOT/vt"

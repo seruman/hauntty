@@ -70,8 +70,8 @@ func TestRoundTrip(t *testing.T) {
 		}},
 		{"Sessions", &Sessions{
 			Sessions: []Session{
-				{Name: "s1", State: "running", Cols: 80, Rows: 24, PID: 100, CreatedAt: 1700000000},
-				{Name: "s2", State: "idle", Cols: 120, Rows: 40, PID: 200, CreatedAt: 1700000001},
+				{Name: "s1", State: "running", Cols: 80, Rows: 24, PID: 100, CreatedAt: 1700000000, CWD: "/home/user/src"},
+				{Name: "s2", State: "idle", Cols: 120, Rows: 40, PID: 200, CreatedAt: 1700000001, CWD: ""},
 			},
 		}},
 		{"SessionsEmpty", &Sessions{Sessions: []Session{}}},

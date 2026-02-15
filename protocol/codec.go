@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	ProtocolVersion uint8  = 4
+	ProtocolVersion uint8  = 5
 	maxFrameSize    uint32 = 16 << 20 // 16MB
 )
 

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sync"
 	"sync/atomic"
 
@@ -74,6 +75,8 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		gxGetCursor:  mod.ExportedFunction("gx_get_cursor_pos"),
 		gxIsAltScr:   mod.ExportedFunction("gx_is_alt_screen"),
 		gxEncodeKey:  mod.ExportedFunction("gx_encode_key"),
+		gxGetPwdLen:  mod.ExportedFunction("gx_get_pwd_len"),
+		gxGetPwdPtr:  mod.ExportedFunction("gx_get_pwd_ptr"),
 	}
 
 	for name, fn := range map[string]api.Function{
@@ -88,6 +91,8 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 		"gx_get_cursor_pos": t.gxGetCursor,
 		"gx_is_alt_screen":  t.gxIsAltScr,
 		"gx_encode_key":     t.gxEncodeKey,
+		"gx_get_pwd_len":    t.gxGetPwdLen,
+		"gx_get_pwd_ptr":    t.gxGetPwdPtr,
 	} {
 		if fn == nil {
 			mod.Close(ctx)
@@ -139,6 +144,8 @@ type Terminal struct {
 	gxGetCursor  api.Function
 	gxIsAltScr   api.Function
 	gxEncodeKey  api.Function
+	gxGetPwdLen  api.Function
+	gxGetPwdPtr  api.Function
 
 	feedPtr uint32
 	feedLen uint32
@@ -317,6 +324,42 @@ func (t *Terminal) EncodeKey(ctx context.Context, keyCode, mods uint32) ([]byte,
 	out := make([]byte, len(buf))
 	copy(out, buf)
 	return out, nil
+}
+
+func (t *Terminal) GetPwd(ctx context.Context) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	results, err := t.gxGetPwdLen.Call(ctx)
+	if err != nil || results[0] == 0 {
+		return ""
+	}
+	length := uint32(results[0])
+
+	results, err = t.gxGetPwdPtr.Call(ctx)
+	if err != nil || results[0] == 0 {
+		return ""
+	}
+	ptr := uint32(results[0])
+
+	buf, ok := t.mod.Memory().Read(ptr, length)
+	if !ok {
+		return ""
+	}
+	raw := make([]byte, len(buf))
+	copy(raw, buf)
+	return stripFileURL(string(raw))
+}
+
+func stripFileURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if u.Scheme != "" && u.Path != "" {
+		return u.Path
+	}
+	return raw
 }
 
 func (t *Terminal) Close(ctx context.Context) error {

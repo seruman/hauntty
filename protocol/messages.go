@@ -38,6 +38,7 @@ type Session struct {
 	Rows      uint16
 	PID       uint32
 	CreatedAt uint32
+	CWD       string
 }
 
 // --- Client → Daemon messages ---
@@ -456,6 +457,9 @@ func (m *Sessions) encode(e *Encoder) error {
 		if err := e.WriteU32(s.CreatedAt); err != nil {
 			return err
 		}
+		if err := e.WriteString(s.CWD); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -484,6 +488,9 @@ func (m *Sessions) decode(d *Decoder) error {
 			return err
 		}
 		if s.CreatedAt, err = d.ReadU32(); err != nil {
+			return err
+		}
+		if s.CWD, err = d.ReadString(); err != nil {
 			return err
 		}
 	}

@@ -280,6 +280,30 @@ func TestEncodeKeyKittyMode(t *testing.T) {
 	})
 }
 
+func TestGetPwd(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.NewRuntime(ctx)
+	assert.NilError(t, err)
+	defer rt.Close(ctx)
+
+	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	defer term.Close(ctx)
+
+	assert.Equal(t, term.GetPwd(ctx), "")
+
+	err = term.Feed(ctx, []byte("\x1b]7;file:///tmp/example\x1b\\"))
+	assert.NilError(t, err)
+	assert.Equal(t, term.GetPwd(ctx), "/tmp/example")
+
+	err = term.Feed(ctx, []byte("\x1b]7;file:///home/user/src\x07"))
+	assert.NilError(t, err)
+	assert.Equal(t, term.GetPwd(ctx), "/home/user/src")
+
+	err = term.Feed(ctx, []byte("\x1b]7;kitty-shell-cwd://myhost/var/log\x07"))
+	assert.NilError(t, err)
+	assert.Equal(t, term.GetPwd(ctx), "/var/log")
+}
+
 func TestReInit(t *testing.T) {
 	ctx := context.Background()
 	rt, err := wasm.NewRuntime(ctx)

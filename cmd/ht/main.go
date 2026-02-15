@@ -80,24 +80,30 @@ func (cmd *ListCmd) Run() error {
 		return err
 	}
 
+	home, _ := os.UserHomeDir()
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tPID\tCREATED")
+	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tCWD\tPID\tCREATED")
 	n := 0
 	for _, s := range sessions.Sessions {
 		if !cmd.All && s.State == "dead" {
 			continue
 		}
 		n++
+		cwd := s.CWD
+		if home != "" && strings.HasPrefix(cwd, home) {
+			cwd = "~" + cwd[len(home):]
+		}
 		if s.PID == 0 {
 			created := "-"
 			if s.CreatedAt != 0 {
 				created = time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
 			}
-			fmt.Fprintf(w, "%s\t%s\t%dx%d\t-\t%s\n", s.Name, s.State, s.Cols, s.Rows, created)
+			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%s\t-\t%s\n", s.Name, s.State, s.Cols, s.Rows, cwd, created)
 		} else {
 			created := time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
-			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%d\t%s\n",
-				s.Name, s.State, s.Cols, s.Rows, s.PID, created)
+			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%s\t%d\t%s\n",
+				s.Name, s.State, s.Cols, s.Rows, cwd, s.PID, created)
 		}
 	}
 	if n == 0 {

@@ -333,6 +333,7 @@ func (s *Server) handleList(conn *protocol.Conn) {
 			Rows:      sess.Rows,
 			PID:       sess.PID,
 			CreatedAt: uint32(sess.CreatedAt.Unix()),
+			CWD:       sess.term.GetPwd(context.Background()),
 		})
 	}
 	s.mu.RUnlock()

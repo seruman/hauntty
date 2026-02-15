@@ -1,0 +1,26 @@
+diff --git a/src/terminal/stream_readonly.zig b/src/terminal/stream_readonly.zig
+index eca13bf06..27308d328 100644
+--- a/src/terminal/stream_readonly.zig
++++ b/src/terminal/stream_readonly.zig
+@@ -158,6 +158,13 @@ pub const Handler = struct {
+             .color_operation => try self.colorOperation(value.op, &value.requests),
+             .kitty_color_report => try self.kittyColorOperation(value),
+ 
++            // hauntty patch: store raw OSC 7 URL for cwd tracking.
++            // Upstream skips this in readonly stream because its use cases
++            // (replay, CI) don't need pwd. We only call setPwd (trivial
++            // ArrayList store), skipping the full reportPwd's URL validation,
++            // hostname checks, and surface messaging.
++            .report_pwd => self.terminal.setPwd(value.url) catch {},
++
+             // No supported DCS commands have any terminal-modifying effects,
+             // but they may in the future. For now we just ignore it.
+             .dcs_hook,
+@@ -183,7 +190,6 @@ pub const Handler = struct {
+             .device_status,
+             .kitty_keyboard_query,
+             .window_title,
+-            .report_pwd,
+             .show_desktop_notification,
+             .progress_report,
+             .clipboard_contents,

@@ -408,3 +408,15 @@ export fn gx_is_alt_screen() callconv(.c) u32 {
     const t = &(g_terminal orelse return 0);
     return if (t.screens.active_key == .alternate) @as(u32, 1) else @as(u32, 0);
 }
+
+export fn gx_get_pwd_len() callconv(.c) u32 {
+    const t = &(g_terminal orelse return 0);
+    const pwd = t.getPwd() orelse return 0;
+    return @intCast(pwd.len);
+}
+
+export fn gx_get_pwd_ptr() callconv(.c) u32 {
+    const t = &(g_terminal orelse return 0);
+    const pwd = t.getPwd() orelse return 0;
+    return @intFromPtr(pwd.ptr);
+}
