@@ -13,7 +13,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-//go:generate sh ../vt/generate.sh
+//go:generate sh -c "cd ../vt && zig build -Doptimize=ReleaseSmall"
 
 //go:embed hauntty-vt.wasm
 var wasmBinary []byte
