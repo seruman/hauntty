@@ -74,46 +74,70 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", ok.SessionName, ok.PID)
 	}
 
-	// Save host terminal DEC private mode state (XTSAVE) and push kitty
-	// keyboard level so we can restore exactly on detach, rather than
-	// blindly resetting modes the host shell may have had enabled.
-	if _, err := os.Stdout.Write([]byte(
-		"\x1b[?1000;1002;1003;1006;2004;1004;1049;2048;2026;25s" +
-			"\x1b[>0u")); err != nil {
-		return fmt.Errorf("save terminal state: %w", err)
+	// Push kitty keyboard level to isolate inner session keyboard
+	// modes from the host terminal.
+	if _, err := os.Stdout.Write([]byte("\x1b[>0u")); err != nil {
+		return fmt.Errorf("push kitty keyboard: %w", err)
 	}
 
-	// Scroll visible content into scrollback to preserve it, then
-	// clear the visible area for the session screen dump.
-	scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, int(ws.Row))...)
-	scroll = append(scroll, "\x1b[H"...)
-	os.Stdout.Write(scroll)
-
-	// Peek at the first message: if STATE, write the screen dump for
-	// reattach restore. Otherwise fall through to the main loop.
-	firstMsg, err := c.ReadMessage()
-	if err != nil {
-		return fmt.Errorf("read initial message: %w", err)
-	}
-	if state, isState := firstMsg.(*protocol.State); isState {
-		if _, err := os.Stdout.Write(state.ScreenDump); err != nil {
-			return fmt.Errorf("write state dump: %w", err)
+	var firstMsg protocol.Message
+	if ok.Created {
+		// New session: the terminal is empty so the STATE dump is
+		// useless. Read and discard it, then let shell output flow
+		// naturally from the current cursor position.
+		msg, err := c.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("read initial message: %w", err)
 		}
-		firstMsg = nil
+		if _, isState := msg.(*protocol.State); !isState {
+			firstMsg = msg
+		}
+	} else {
+		// Reattach: preserve visible content in scrollback, then
+		// clear for the dump. Query cursor row via DSR so we
+		// scroll exactly the content-bearing rows — no blank
+		// line gap. Then EL-clear every row (ED touches
+		// scrollback in Ghostty, EL does not).
+		// Cooked mode so OPOST translates \n in the dump to \r\n.
+		cursorRow := int(ws.Row) // fallback: scroll everything
+		if tmpState, rerr := term.MakeRaw(fd); rerr == nil {
+			os.Stdout.Write([]byte("\x1b[6n"))
+			cursorRow = readCursorRow(fd, int(ws.Row))
+			term.Restore(fd, tmpState)
+		}
+		scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, cursorRow)...)
+		os.Stdout.Write(scroll)
+		var clear bytes.Buffer
+		for row := 1; row <= int(ws.Row); row++ {
+			fmt.Fprintf(&clear, "\x1b[%d;1H\x1b[2K", row)
+		}
+		clear.WriteString("\x1b[H")
+		os.Stdout.Write(clear.Bytes())
+
+		msg, err := c.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("read initial message: %w", err)
+		}
+		if state, isState := msg.(*protocol.State); isState {
+			if _, err := os.Stdout.Write(state.ScreenDump); err != nil {
+				return fmt.Errorf("write state dump: %w", err)
+			}
+		} else {
+			firstMsg = msg
+		}
 	}
 
+	// Enter raw mode after writing the state dump so OPOST translates
+	// \n in the VT dump to \r\n correctly while in cooked mode.
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return fmt.Errorf("set raw mode: %w", err)
 	}
 	defer term.Restore(fd, oldState)
 
-	// Discard stale terminal responses (e.g. kitty keyboard query
-	// replies) that accumulated in stdin while connecting. These
-	// arrive because the inner shell's queries pass through to
-	// the host terminal, whose responses sit in the kernel buffer
-	// until we start reading.
-	drainStdin(fd, 10*time.Millisecond)
+	// Drain terminal responses from the kitty keyboard push and any
+	// mode-setting sequences in the state dump.
+	drainStdin(fd, 50*time.Millisecond)
 
 	sigwinch := make(chan os.Signal, 1)
 	signal.Notify(sigwinch, unix.SIGWINCH)
@@ -215,23 +239,20 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		if err != nil {
 			close(done)
 			if err == io.EOF || isConnClosed(err) {
-				// All restore work happens in raw mode so we can
-				// drain terminal responses before the host shell
-				// sees them.
-
-				// Disable event-generating modes.
-				os.Stdout.Write([]byte("\x1b[?1004;1000;1002;1003;1006;2048l"))
-				drainStdin(fd, 20*time.Millisecond)
-
-				// Restore host terminal state: XTRESTORE (DEC private
-				// modes), pop kitty keyboard, reset SGR.
+				// Use 1047 (not 1049) to exit alt screen: 1047
+				// just switches the buffer without restoring the
+				// saved cursor, so session content on the primary
+				// screen stays intact. No-op when already on primary.
+				//
+				// Reset modes, show cursor, pop kitty keyboard,
+				// reset SGR, erase from cursor to end of screen.
+				// Session content above the cursor is preserved.
 				os.Stdout.Write([]byte(
-					"\x1b[?1000;1002;1003;1006;2004;1004;1049;2048;2026;25r" +
+					"\x1b[?1047;1;1000;1002;1003;1006;1004;2004;2048;2026l" +
+						"\x1b[?25h" +
 						"\x1b[<u" +
-						"\x1b[0m"))
-
-				// Drain responses from restored modes (focus events,
-				// color reports, geometry replies, etc.).
+						"\x1b[0m" +
+						"\x1b[J"))
 				drainStdin(fd, 20*time.Millisecond)
 				term.Restore(fd, oldState)
 				fmt.Fprintf(os.Stderr, "[hauntty] detached\n")
@@ -246,6 +267,55 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			os.Exit(exitCode)
 		}
 	}
+}
+
+// readCursorRow reads the DSR response (\x1b[{row};{col}R) from fd
+// and returns the cursor row. Must be called in raw mode after sending
+// \x1b[6n. Returns fallback if the response cannot be parsed.
+func readCursorRow(fd int, fallback int) int {
+	var buf [32]byte
+	var n int
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for n < len(buf) && time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		tv := unix.NsecToTimeval(remaining.Nanoseconds())
+		var fds unix.FdSet
+		fds.Set(fd)
+		ready, _ := unix.Select(fd+1, &fds, nil, nil, &tv)
+		if ready <= 0 {
+			break
+		}
+		nr, _ := unix.Read(fd, buf[n:])
+		if nr > 0 {
+			n += nr
+			if buf[n-1] == 'R' {
+				break
+			}
+		}
+	}
+	// Parse \x1b[{row};{col}R — use last '[' to skip any
+	// preceding terminal responses (e.g. focus events).
+	resp := buf[:n]
+	start := bytes.LastIndexByte(resp, '[')
+	if start < 0 {
+		return fallback
+	}
+	resp = resp[start+1:]
+	before, _, ok := bytes.Cut(resp, []byte{';'})
+	if !ok {
+		return fallback
+	}
+	row := 0
+	for _, b := range before {
+		if b < '0' || b > '9' {
+			return fallback
+		}
+		row = row*10 + int(b-'0')
+	}
+	if row <= 0 {
+		return fallback
+	}
+	return row
 }
 
 // drainStdin reads and discards any pending bytes on fd for the given
