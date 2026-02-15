@@ -107,6 +107,29 @@ func setupFish(env []string, resourcesDir string) []string {
 	return env
 }
 
+// mergeEnv starts with base and overlays overrides on top.
+// Override vars replace base vars with the same key.
+func mergeEnv(base, overrides []string) []string {
+	merged := make([]string, len(base))
+	copy(merged, base)
+	for _, ov := range overrides {
+		k, _, _ := strings.Cut(ov, "=")
+		found := false
+		prefix := k + "="
+		for i, e := range merged {
+			if strings.HasPrefix(e, prefix) {
+				merged[i] = ov
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged = append(merged, ov)
+		}
+	}
+	return merged
+}
+
 func getEnv(env []string, key string) string {
 	prefix := key + "="
 	for _, e := range env {

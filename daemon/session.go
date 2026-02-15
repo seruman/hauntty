@@ -78,6 +78,7 @@ func resolveCommand(command []string, env []string) []string {
 }
 
 func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, resizePolicy string) (*Session, error) {
+	env = mergeEnv(os.Environ(), env)
 	command = resolveCommand(command, env)
 
 	shellArgs, shellEnv, tempDir, err := SetupShellEnv(command, env, name)
@@ -135,6 +136,8 @@ func newSession(ctx context.Context, name string, command []string, env []string
 }
 
 func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState, resizePolicy string) (*Session, error) {
+	env = mergeEnv(os.Environ(), env)
+
 	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
 	if err != nil {
 		return nil, err
