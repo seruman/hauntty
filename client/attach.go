@@ -83,9 +83,11 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		return fmt.Errorf("save terminal state: %w", err)
 	}
 
-	if _, err := os.Stdout.Write([]byte("\x1b[2J\x1b[H")); err != nil {
-		return fmt.Errorf("clear screen: %w", err)
-	}
+	// Scroll visible content into scrollback to preserve it, then
+	// clear the visible area for the session screen dump.
+	scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, int(ws.Row))...)
+	scroll = append(scroll, "\x1b[H"...)
+	os.Stdout.Write(scroll)
 
 	// Peek at the first message: if STATE, write the screen dump for
 	// reattach restore. Otherwise fall through to the main loop.
@@ -165,6 +167,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 					}
 					mu.Lock()
 					_ = c.Detach()
+					c.Close()
 					mu.Unlock()
 					return
 				}
@@ -221,13 +224,11 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 				drainStdin(fd, 20*time.Millisecond)
 
 				// Restore host terminal state: XTRESTORE (DEC private
-				// modes), pop kitty keyboard, reset scroll region,
-				// reset SGR, clear screen.
+				// modes), pop kitty keyboard, reset SGR.
 				os.Stdout.Write([]byte(
 					"\x1b[?1000;1002;1003;1006;2004;1004;1049;2048;2026;25r" +
 						"\x1b[<u" +
-						"\x1b[r" +
-						"\x1b[0m\x1b[2J\x1b[H"))
+						"\x1b[0m"))
 
 				// Drain responses from restored modes (focus events,
 				// color reports, geometry replies, etc.).
