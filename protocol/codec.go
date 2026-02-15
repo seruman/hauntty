@@ -118,8 +118,8 @@ func newMessage(t uint8) (Message, error) {
 		return &Prune{}, nil
 	case TypeSendKey:
 		return &SendKey{}, nil
-	case TypeRename:
-		return &Rename{}, nil
+	case TypeStatus:
+		return &Status{}, nil
 	case TypeOK:
 		return &OK{}, nil
 	case TypeError:
@@ -138,6 +138,8 @@ func newMessage(t uint8) (Message, error) {
 		return &PruneResponse{}, nil
 	case TypeClientsChanged:
 		return &ClientsChanged{}, nil
+	case TypeStatusResponse:
+		return &StatusResponse{}, nil
 	default:
 		return nil, fmt.Errorf("unknown message type: 0x%02x", t)
 	}

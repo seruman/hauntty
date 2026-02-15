@@ -12,7 +12,7 @@ const (
 	TypeDump    uint8 = 0x08
 	TypePrune   uint8 = 0x09
 	TypeSendKey uint8 = 0x0A
-	TypeRename  uint8 = 0x0B
+	TypeStatus  uint8 = 0x0C
 
 	// Daemon → Client
 	TypeOK             uint8 = 0x80
@@ -24,6 +24,7 @@ const (
 	TypeDumpResponse   uint8 = 0x86
 	TypePruneResponse  uint8 = 0x87
 	TypeClientsChanged uint8 = 0x88
+	TypeStatusResponse uint8 = 0x89
 )
 
 type Message interface {
@@ -300,29 +301,6 @@ func (m *Dump) decode(d *Decoder) error {
 	return err
 }
 
-type Rename struct {
-	OldName string
-	NewName string
-}
-
-func (m *Rename) Type() uint8 { return TypeRename }
-
-func (m *Rename) encode(e *Encoder) error {
-	if err := e.WriteString(m.OldName); err != nil {
-		return err
-	}
-	return e.WriteString(m.NewName)
-}
-
-func (m *Rename) decode(d *Decoder) error {
-	var err error
-	if m.OldName, err = d.ReadString(); err != nil {
-		return err
-	}
-	m.NewName, err = d.ReadString()
-	return err
-}
-
 type Prune struct{}
 
 func (m *Prune) Type() uint8             { return TypePrune }
@@ -596,5 +574,136 @@ func (m *ClientsChanged) decode(d *Decoder) error {
 		return err
 	}
 	m.Rows, err = d.ReadU16()
+	return err
+}
+
+type Status struct {
+	SessionName string
+}
+
+func (m *Status) Type() uint8 { return TypeStatus }
+
+func (m *Status) encode(e *Encoder) error {
+	return e.WriteString(m.SessionName)
+}
+
+func (m *Status) decode(d *Decoder) error {
+	var err error
+	m.SessionName, err = d.ReadString()
+	return err
+}
+
+type DaemonStatus struct {
+	PID          uint32
+	Uptime       uint32
+	SocketPath   string
+	RunningCount uint32
+	DeadCount    uint32
+}
+
+type SessionStatus struct {
+	Name        string
+	State       string
+	Cols        uint16
+	Rows        uint16
+	PID         uint32
+	CWD         string
+	ClientCount uint32
+}
+
+type StatusResponse struct {
+	Daemon  DaemonStatus
+	Session *SessionStatus
+}
+
+func (m *StatusResponse) Type() uint8 { return TypeStatusResponse }
+
+func (m *StatusResponse) encode(e *Encoder) error {
+	if err := e.WriteU32(m.Daemon.PID); err != nil {
+		return err
+	}
+	if err := e.WriteU32(m.Daemon.Uptime); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.Daemon.SocketPath); err != nil {
+		return err
+	}
+	if err := e.WriteU32(m.Daemon.RunningCount); err != nil {
+		return err
+	}
+	if err := e.WriteU32(m.Daemon.DeadCount); err != nil {
+		return err
+	}
+	if m.Session == nil {
+		return e.WriteU8(0)
+	}
+	if err := e.WriteU8(1); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.Session.Name); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.Session.State); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Session.Cols); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Session.Rows); err != nil {
+		return err
+	}
+	if err := e.WriteU32(m.Session.PID); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.Session.CWD); err != nil {
+		return err
+	}
+	return e.WriteU32(m.Session.ClientCount)
+}
+
+func (m *StatusResponse) decode(d *Decoder) error {
+	var err error
+	if m.Daemon.PID, err = d.ReadU32(); err != nil {
+		return err
+	}
+	if m.Daemon.Uptime, err = d.ReadU32(); err != nil {
+		return err
+	}
+	if m.Daemon.SocketPath, err = d.ReadString(); err != nil {
+		return err
+	}
+	if m.Daemon.RunningCount, err = d.ReadU32(); err != nil {
+		return err
+	}
+	if m.Daemon.DeadCount, err = d.ReadU32(); err != nil {
+		return err
+	}
+	flag, err := d.ReadU8()
+	if err != nil {
+		return err
+	}
+	if flag == 0 {
+		return nil
+	}
+	m.Session = &SessionStatus{}
+	if m.Session.Name, err = d.ReadString(); err != nil {
+		return err
+	}
+	if m.Session.State, err = d.ReadString(); err != nil {
+		return err
+	}
+	if m.Session.Cols, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.Session.Rows, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.Session.PID, err = d.ReadU32(); err != nil {
+		return err
+	}
+	if m.Session.CWD, err = d.ReadString(); err != nil {
+		return err
+	}
+	m.Session.ClientCount, err = d.ReadU32()
 	return err
 }

@@ -249,16 +249,6 @@ func CleanState(name string) error {
 	return err
 }
 
-func RenameState(oldName, newName string) error {
-	dir := stateDir()
-	oldPath := filepath.Join(dir, oldName+".state")
-	newPath := filepath.Join(dir, newName+".state")
-	if _, err := os.Stat(newPath); err == nil {
-		return fmt.Errorf("state file for %q already exists", newName)
-	}
-	return os.Rename(oldPath, newPath)
-}
-
 // CleanStaleTmp removes leftover .state.tmp files from interrupted writes.
 func CleanStaleTmp() {
 	dir := stateDir()

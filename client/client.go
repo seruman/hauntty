@@ -182,28 +182,28 @@ func (c *Client) Prune() (uint32, error) {
 	}
 }
 
+func (c *Client) Status(sessionName string) (*protocol.StatusResponse, error) {
+	if err := c.conn.WriteMessage(&protocol.Status{SessionName: sessionName}); err != nil {
+		return nil, fmt.Errorf("send status: %w", err)
+	}
+	msg, err := c.conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("read status response: %w", err)
+	}
+	switch m := msg.(type) {
+	case *protocol.StatusResponse:
+		return m, nil
+	case *protocol.Error:
+		return nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+	default:
+		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+	}
+}
+
 func (c *Client) Detach() error {
 	return c.conn.WriteMessage(&protocol.Detach{})
 }
 
 func (c *Client) DetachSession(name string) error {
 	return c.conn.WriteMessage(&protocol.Detach{Name: name})
-}
-
-func (c *Client) Rename(oldName, newName string) error {
-	if err := c.conn.WriteMessage(&protocol.Rename{OldName: oldName, NewName: newName}); err != nil {
-		return fmt.Errorf("send rename: %w", err)
-	}
-	msg, err := c.conn.ReadMessage()
-	if err != nil {
-		return fmt.Errorf("read rename response: %w", err)
-	}
-	switch m := msg.(type) {
-	case *protocol.OK:
-		return nil
-	case *protocol.Error:
-		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
-	default:
-		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
-	}
 }

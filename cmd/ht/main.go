@@ -30,7 +30,7 @@ type CLI struct {
 	Dump   DumpCmd   `cmd:"" help:"Dump session contents."`
 	Detach DetachCmd `cmd:"" help:"Detach from current session."`
 	Wait   WaitCmd   `cmd:"" help:"Wait for session output to match a pattern."`
-	Rename RenameCmd `cmd:"" aliases:"mv" help:"Rename a session."`
+	Status StatusCmd `cmd:"" aliases:"st" help:"Show daemon and session status."`
 	Prune  PruneCmd  `cmd:"" help:"Delete dead session state files."`
 	Config ConfigCmd `cmd:"" help:"Print effective configuration."`
 	Daemon DaemonCmd `cmd:"" help:"Start daemon in foreground."`
@@ -226,6 +226,59 @@ func (cmd *DetachCmd) Run(cfg *config.Config) error {
 	return c.DetachSession(sessionName)
 }
 
+type StatusCmd struct{}
+
+func (cmd *StatusCmd) Run(cfg *config.Config) error {
+	c, err := client.Connect(cfg.Daemon.SocketPath)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	resp, err := c.Status(os.Getenv("HAUNTTY_SESSION"))
+	if err != nil {
+		return err
+	}
+
+	home, _ := os.UserHomeDir()
+
+	d := resp.Daemon
+	fmt.Printf("daemon:   running (pid %d, uptime %s)\n", d.PID, formatUptime(d.Uptime))
+	fmt.Printf("socket:   %s\n", d.SocketPath)
+	fmt.Printf("sessions: %d running, %d dead\n", d.RunningCount, d.DeadCount)
+
+	if resp.Session != nil {
+		s := resp.Session
+		cwd := s.CWD
+		if home != "" && strings.HasPrefix(cwd, home) {
+			cwd = "~" + cwd[len(home):]
+		}
+		fmt.Println()
+		fmt.Printf("session:  %s\n", s.Name)
+		fmt.Printf("state:    %s\n", s.State)
+		fmt.Printf("size:     %dx%d\n", s.Cols, s.Rows)
+		fmt.Printf("cwd:      %s\n", cwd)
+		fmt.Printf("pid:      %d\n", s.PID)
+		fmt.Printf("clients:  %d\n", s.ClientCount)
+	}
+
+	return nil
+}
+
+func formatUptime(seconds uint32) string {
+	d := time.Duration(seconds) * time.Second
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
+}
+
 type WaitCmd struct {
 	Name     string `arg:"" help:"Session name."`
 	Pattern  string `arg:"" help:"Pattern to match."`
@@ -282,25 +335,6 @@ func (cmd *WaitCmd) Run(cfg *config.Config) error {
 
 		time.Sleep(time.Duration(cmd.Interval) * time.Millisecond)
 	}
-}
-
-type RenameCmd struct {
-	Old string `arg:"" help:"Current session name."`
-	New string `arg:"" help:"New session name."`
-}
-
-func (cmd *RenameCmd) Run(cfg *config.Config) error {
-	c, err := client.Connect(cfg.Daemon.SocketPath)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	if err := c.Rename(cmd.Old, cmd.New); err != nil {
-		return err
-	}
-	fmt.Printf("renamed %q to %q\n", cmd.Old, cmd.New)
-	return nil
 }
 
 type PruneCmd struct{}

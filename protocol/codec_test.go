@@ -84,7 +84,36 @@ func TestRoundTrip(t *testing.T) {
 		{"PruneResponse", &PruneResponse{Count: 3}},
 		{"ClientsChanged", &ClientsChanged{Count: 2, Cols: 80, Rows: 24}},
 		{"ClientsChangedSingle", &ClientsChanged{Count: 1, Cols: 120, Rows: 40}},
-		{"Rename", &Rename{OldName: "old-session", NewName: "new-session"}},
+		{"Status", &Status{SessionName: "my-session"}},
+		{"StatusEmpty", &Status{SessionName: ""}},
+		{"StatusResponse", &StatusResponse{
+			Daemon: DaemonStatus{
+				PID:          12345,
+				Uptime:       7980,
+				SocketPath:   "/tmp/hauntty-501/hauntty.sock",
+				RunningCount: 3,
+				DeadCount:    1,
+			},
+			Session: &SessionStatus{
+				Name:        "curious-fox",
+				State:       "running",
+				Cols:        120,
+				Rows:        40,
+				PID:         12389,
+				CWD:         "/home/user/project",
+				ClientCount: 2,
+			},
+		}},
+		{"StatusResponseNoSession", &StatusResponse{
+			Daemon: DaemonStatus{
+				PID:          99,
+				Uptime:       60,
+				SocketPath:   "/tmp/hauntty.sock",
+				RunningCount: 0,
+				DeadCount:    0,
+			},
+			Session: nil,
+		}},
 	}
 
 	for _, tt := range tests {

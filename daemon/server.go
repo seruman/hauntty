@@ -36,6 +36,7 @@ type Server struct {
 	resizePolicy      string
 	autoExit          bool
 	shutdownOnce      sync.Once
+	startedAt         time.Time
 }
 
 func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy string) (*Server, error) {
@@ -55,6 +56,7 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy string) (*S
 		defaultScrollback: cfg.DefaultScrollback,
 		resizePolicy:      resizePolicy,
 		autoExit:          cfg.AutoExit,
+		startedAt:         time.Now(),
 	}
 
 	if cfg.StatePersistence {
@@ -219,8 +221,8 @@ func (s *Server) handleConn(netConn net.Conn) {
 			s.handleDump(conn, m)
 		case *protocol.Prune:
 			s.handlePrune(conn)
-		case *protocol.Rename:
-			s.handleRename(conn, m)
+		case *protocol.Status:
+			s.handleStatus(conn, m)
 		}
 	}
 
@@ -491,40 +493,58 @@ func (s *Server) handlePrune(conn *protocol.Conn) {
 	}
 }
 
-func (s *Server) handleRename(conn *protocol.Conn, msg *protocol.Rename) {
-	if msg.NewName == "" || msg.OldName == msg.NewName {
-		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "invalid rename"}); err != nil {
-			slog.Debug("write error response", "err", err)
+func (s *Server) handleStatus(conn *protocol.Conn, msg *protocol.Status) {
+	s.mu.RLock()
+	running := make(map[string]bool, len(s.sessions))
+	var runningCount uint32
+	var deadCount uint32
+	for _, sess := range s.sessions {
+		running[sess.Name] = true
+		if sess.isRunning() {
+			runningCount++
+		} else {
+			deadCount++
 		}
-		return
 	}
 
-	s.mu.Lock()
-	if _, exists := s.sessions[msg.NewName]; exists {
-		s.mu.Unlock()
-		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session already exists"}); err != nil {
-			slog.Debug("write error response", "err", err)
-		}
-		return
-	}
-
-	if sess, ok := s.sessions[msg.OldName]; ok {
-		delete(s.sessions, msg.OldName)
-		sess.Name = msg.NewName
-		s.sessions[msg.NewName] = sess
-		s.mu.Unlock()
-	} else {
-		s.mu.Unlock()
-		if err := RenameState(msg.OldName, msg.NewName); err != nil {
-			if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
-				slog.Debug("write error response", "err", err)
+	var ss *protocol.SessionStatus
+	if msg.SessionName != "" {
+		if sess, ok := s.sessions[msg.SessionName]; ok {
+			state := "running"
+			if !sess.isRunning() {
+				state = "dead"
 			}
-			return
+			sess.clientMu.Lock()
+			clientCount := uint32(len(sess.clients))
+			sess.clientMu.Unlock()
+			ss = &protocol.SessionStatus{
+				Name:        sess.Name,
+				State:       state,
+				Cols:        sess.Cols,
+				Rows:        sess.Rows,
+				PID:         sess.PID,
+				CWD:         sess.term.GetPwd(context.Background()),
+				ClientCount: clientCount,
+			}
 		}
 	}
+	s.mu.RUnlock()
 
-	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.NewName}); err != nil {
-		slog.Debug("write ok response", "err", err)
+	dead, _ := ListDeadSessions(running)
+	deadCount += uint32(len(dead))
+
+	resp := &protocol.StatusResponse{
+		Daemon: protocol.DaemonStatus{
+			PID:          uint32(os.Getpid()),
+			Uptime:       uint32(time.Since(s.startedAt).Seconds()),
+			SocketPath:   s.socketPath,
+			RunningCount: runningCount,
+			DeadCount:    deadCount,
+		},
+		Session: ss,
+	}
+	if err := conn.WriteMessage(resp); err != nil {
+		slog.Debug("write status response", "err", err)
 	}
 }
 
