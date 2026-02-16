@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	hauntty "github.com/selman/hauntty"
 	"github.com/selman/hauntty/protocol"
 )
 
@@ -22,13 +23,17 @@ func Connect(socketPath string) (*Client, error) {
 		conn:    protocol.NewConn(nc),
 		netConn: nc,
 	}
-	accepted, err := c.conn.Handshake(protocol.ProtocolVersion)
+	accepted, serverRev, err := c.conn.Handshake(protocol.ProtocolVersion, hauntty.Version())
 	if err != nil {
 		nc.Close()
 		return nil, fmt.Errorf("handshake: %w", err)
 	}
 	if accepted != protocol.ProtocolVersion {
 		nc.Close()
+		clientRev := hauntty.Version()
+		if serverRev != "" && serverRev != clientRev {
+			return nil, fmt.Errorf("revision mismatch: client=%s server=%s (restart the daemon)", clientRev, serverRev)
+		}
 		return nil, fmt.Errorf("protocol version mismatch: server accepted %d, expected %d", accepted, protocol.ProtocolVersion)
 	}
 	return c, nil

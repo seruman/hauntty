@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	hauntty "github.com/selman/hauntty"
 	"github.com/selman/hauntty/config"
 	"github.com/selman/hauntty/namegen"
 	"github.com/selman/hauntty/protocol"
@@ -155,17 +156,26 @@ func (s *Server) handleConn(netConn net.Conn) {
 
 	conn := protocol.NewConn(netConn)
 
-	clientVer, err := conn.AcceptHandshake()
+	clientVer, clientRev, err := conn.AcceptHandshake()
 	if err != nil {
 		return
 	}
 	if clientVer != protocol.ProtocolVersion {
-		if err := conn.AcceptVersion(0); err != nil {
+		if err := conn.AcceptVersion(0, ""); err != nil {
 			slog.Debug("reject handshake", "err", err)
 		}
 		return
 	}
-	if err := conn.AcceptVersion(protocol.ProtocolVersion); err != nil {
+	// TODO: replace exact match with semver compatibility negotiation.
+	serverRev := hauntty.Version()
+	if clientRev != serverRev {
+		slog.Warn("rejected client: revision mismatch", "client", clientRev, "server", serverRev)
+		if err := conn.AcceptVersion(0, serverRev); err != nil {
+			slog.Debug("reject handshake", "err", err)
+		}
+		return
+	}
+	if err := conn.AcceptVersion(protocol.ProtocolVersion, serverRev); err != nil {
 		return
 	}
 

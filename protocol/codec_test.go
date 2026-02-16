@@ -145,23 +145,26 @@ func TestHandshake(t *testing.T) {
 	}{sr, sw})
 
 	var serverVer uint8
+	var serverRev string
 	var serverErr error
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		serverVer, serverErr = serverConn.AcceptHandshake()
+		serverVer, serverRev, serverErr = serverConn.AcceptHandshake()
 		if serverErr == nil {
-			serverErr = serverConn.AcceptVersion(serverVer)
+			serverErr = serverConn.AcceptVersion(serverVer, serverRev)
 		}
 	}()
 
-	accepted, err := clientConn.Handshake(ProtocolVersion)
+	accepted, rev, err := clientConn.Handshake(ProtocolVersion, "abc123")
 	assert.NilError(t, err)
 	assert.Equal(t, accepted, ProtocolVersion)
+	assert.Equal(t, rev, "abc123")
 
 	<-done
 	assert.NilError(t, serverErr)
 	assert.Equal(t, serverVer, ProtocolVersion)
+	assert.Equal(t, serverRev, "abc123")
 }
 
 func TestHandshakeVersionMismatch(t *testing.T) {
@@ -180,12 +183,12 @@ func TestHandshakeVersionMismatch(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = serverConn.AcceptHandshake()
+		_, _, _ = serverConn.AcceptHandshake()
 		// Reject: send version 0.
-		serverConn.AcceptVersion(0)
+		serverConn.AcceptVersion(0, "")
 	}()
 
-	accepted, err := clientConn.Handshake(ProtocolVersion)
+	accepted, _, err := clientConn.Handshake(ProtocolVersion, "abc123")
 	assert.NilError(t, err)
 	assert.Equal(t, accepted, uint8(0))
 

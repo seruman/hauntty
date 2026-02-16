@@ -15,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
+	hauntty "github.com/selman/hauntty"
 	"github.com/selman/hauntty/client"
 	"github.com/selman/hauntty/config"
 	"github.com/selman/hauntty/daemon"
@@ -420,7 +421,10 @@ func (cmd *DaemonCmd) Run(cfg *config.Config) error {
 
 func main() {
 	var cli CLI
-	ctx := kong.Parse(&cli, kong.UsageOnError())
+	ctx := kong.Parse(&cli,
+		kong.UsageOnError(),
+		kong.Vars{"version": hauntty.Version()},
+	)
 	cfg, err := config.Load()
 	ctx.FatalIfErrorf(err)
 	if cli.Socket != "" {

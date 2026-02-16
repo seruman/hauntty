@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	ProtocolVersion uint8  = 5
+	ProtocolVersion uint8  = 6
 	maxFrameSize    uint32 = 16 << 20 // 16MB
 )
 
@@ -76,24 +76,46 @@ func (c *Conn) ReadMessage() (Message, error) {
 	return msg, nil
 }
 
-func (c *Conn) Handshake(version uint8) (uint8, error) {
+func (c *Conn) Handshake(version uint8, revision string) (uint8, string, error) {
 	enc := NewEncoder(c.rw)
 	if err := enc.WriteU8(version); err != nil {
-		return 0, err
+		return 0, "", err
+	}
+	if err := enc.WriteString(revision); err != nil {
+		return 0, "", err
 	}
 	dec := NewDecoder(c.rw)
-	return dec.ReadU8()
+	serverVer, err := dec.ReadU8()
+	if err != nil {
+		return 0, "", err
+	}
+	serverRev, err := dec.ReadString()
+	if err != nil {
+		return 0, "", err
+	}
+	return serverVer, serverRev, nil
 }
 
 // Caller must check the version and call AcceptVersion or close.
-func (c *Conn) AcceptHandshake() (uint8, error) {
+func (c *Conn) AcceptHandshake() (uint8, string, error) {
 	dec := NewDecoder(c.rw)
-	return dec.ReadU8()
+	version, err := dec.ReadU8()
+	if err != nil {
+		return 0, "", err
+	}
+	revision, err := dec.ReadString()
+	if err != nil {
+		return 0, "", err
+	}
+	return version, revision, nil
 }
 
-func (c *Conn) AcceptVersion(version uint8) error {
+func (c *Conn) AcceptVersion(version uint8, revision string) error {
 	enc := NewEncoder(c.rw)
-	return enc.WriteU8(version)
+	if err := enc.WriteU8(version); err != nil {
+		return err
+	}
+	return enc.WriteString(revision)
 }
 
 func newMessage(t uint8) (Message, error) {
