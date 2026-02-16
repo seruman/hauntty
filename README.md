@@ -2,12 +2,9 @@
 
 Terminal session persistence. Run sessions that survive disconnects, reattach later.
 
-> [!WARNING]
-> This is a learning project built with heavy LLM assistance. It works for me but I wouldn't trust it for your use cases. You're probably better off using [tmux](https://github.com/tmux/tmux), [zellij](https://github.com/zellij-org/zellij), [shpool](https://github.com/shell-pool/shpool), or [zmx](https://github.com/neurosnap/zmx). Those are mature projects maintained by people who know what they're doing - this is me tinkering.
-
 ## Why does this exist
 
-Wanted a lightweight session persistence tool. Used it as an excuse to learn PTY internals without leaving Go. LLM did most of the heavy lifting.
+Wanted to understand PTY internals without leaving the comfort of Go, so I prompted the shit out of Claude to help me. You're probably better off with [tmux](https://github.com/tmux/tmux), [zellij](https://github.com/zellij-org/zellij), [shpool](https://github.com/shell-pool/shpool), or [zmx](https://github.com/neurosnap/zmx).
 
 ## How it works
 
