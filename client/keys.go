@@ -139,8 +139,14 @@ func ParseDetachKey(notation string) (DetachKey, error) {
 	if ki.Mods&wasm.ModSuper != 0 {
 		kittyMods += 8
 	}
+	raw := byte(ki.Code & 0x1f)
+	if raw == 0x1b {
+		// The raw ctrl byte collides with ESC (e.g. ctrl+; or ctrl+[).
+		// Only match the CSI u sequence from the kitty keyboard protocol.
+		raw = 0
+	}
 	return DetachKey{
-		rawByte: byte(ki.Code & 0x1f),
+		rawByte: raw,
 		csiSeq:  fmt.Appendf(nil, "\x1b[%d;%du", ki.Code, kittyMods),
 	}, nil
 }

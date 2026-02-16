@@ -45,8 +45,10 @@ func collectEnv(extra []string) []string {
 }
 
 func findDetach(data []byte, dk DetachKey) int {
-	if i := bytes.IndexByte(data, dk.rawByte); i >= 0 {
-		return i
+	if dk.rawByte != 0 {
+		if i := bytes.IndexByte(data, dk.rawByte); i >= 0 {
+			return i
+		}
 	}
 	return bytes.Index(data, dk.csiSeq)
 }
