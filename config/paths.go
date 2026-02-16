@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
-func socketDir() string {
-	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "hauntty")
+var socketPath = sync.OnceValue(func() string {
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+		return filepath.Join(xdg, "hauntty", "hauntty.sock")
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("hauntty-%d", os.Getuid()))
-}
+
+	return filepath.Join(os.TempDir(), fmt.Sprintf("hauntty-%d", os.Getuid()), "hauntty.sock")
+})
 
 func SocketPath() string {
-	return filepath.Join(socketDir(), "hauntty.sock")
+	return socketPath()
 }
