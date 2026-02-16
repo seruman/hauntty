@@ -1,13 +1,9 @@
 package client
 
-import (
-	"net"
+import "net"
 
-	"code.selman.me/hauntty/config"
-)
-
-func DaemonRunning(socketPath string) bool {
-	conn, err := net.Dial("unix", config.SocketPathFrom(socketPath))
+func DaemonRunning(sock string) bool {
+	conn, err := net.Dial("unix", sock)
 	if err != nil {
 		return false
 	}

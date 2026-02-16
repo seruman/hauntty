@@ -1,6 +1,7 @@
 package client
 
 import (
+	"cmp"
 	"fmt"
 	"net"
 
@@ -15,7 +16,7 @@ type Client struct {
 }
 
 func Connect(socketPath string) (*Client, error) {
-	sock := config.SocketPathFrom(socketPath)
+	sock := cmp.Or(socketPath, config.SocketPath())
 	nc, err := net.Dial("unix", sock)
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w", err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -439,21 +440,30 @@ func main() {
 }
 
 func ensureDaemon(socketPath string) error {
-	if client.DaemonRunning(socketPath) {
+	sock := cmp.Or(socketPath, config.SocketPath())
+	if client.DaemonRunning(sock) {
 		return nil
 	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
 	}
-	dir := filepath.Dir(config.SocketPath())
-	os.MkdirAll(dir, 0o700)
+
+	dir := filepath.Dir(sock)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create socket dir: %w", err)
+	}
+
 	logFile, err := os.CreateTemp(dir, "hauntty-server-*.log")
 	if err != nil {
 		return fmt.Errorf("create daemon log: %w", err)
 	}
 
 	cmd := exec.Command(exe, "daemon")
+	if socketPath != "" {
+		cmd.Args = append(cmd.Args, "--socket", socketPath)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = nil
 	cmd.Stderr = logFile
@@ -462,12 +472,12 @@ func ensureDaemon(socketPath string) error {
 		os.Remove(logFile.Name())
 		return fmt.Errorf("start daemon: %w", err)
 	}
-	finalPath := config.LogPath(cmd.Process.Pid)
+
+	finalPath := filepath.Join(dir, fmt.Sprintf("hauntty-server-%d.log", cmd.Process.Pid))
 	os.Rename(logFile.Name(), finalPath)
 	logFile.Close()
 	cmd.Process.Release()
 
-	sock := config.SocketPathFrom(socketPath)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		conn, err := net.Dial("unix", sock)

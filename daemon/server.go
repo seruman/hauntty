@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -48,9 +49,10 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy string) (*S
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
+	sock := cmp.Or(cfg.SocketPath, config.SocketPath())
 	s := &Server{
-		socketPath:        config.SocketPathFrom(cfg.SocketPath),
-		pidPath:           config.PIDPathFrom(cfg.SocketPath),
+		socketPath:        sock,
+		pidPath:           filepath.Join(filepath.Dir(sock), "hauntty.pid"),
 		sessions:          make(map[string]*Session),
 		wasmRT:            rt,
 		ctx:               ctx,
