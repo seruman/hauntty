@@ -50,7 +50,6 @@ func Default() *Config {
 	}
 }
 
-// Returns defaults without error if the file does not exist.
 func Load() (*Config, error) {
 	path, err := DefaultPath()
 	if err != nil {
@@ -59,7 +58,6 @@ func Load() (*Config, error) {
 	return LoadFrom(path)
 }
 
-// Returns defaults without error if the file does not exist.
 func LoadFrom(path string) (*Config, error) {
 	cfg := Default()
 
@@ -71,27 +69,7 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
-	applyDefaults(cfg)
 	return cfg, nil
-}
-
-func applyDefaults(cfg *Config) {
-	d := Default()
-	if cfg.Daemon.DefaultScrollback == 0 {
-		cfg.Daemon.DefaultScrollback = d.Daemon.DefaultScrollback
-	}
-	if cfg.Daemon.StatePersistenceInterval == 0 {
-		cfg.Daemon.StatePersistenceInterval = d.Daemon.StatePersistenceInterval
-	}
-	if cfg.Client.DetachKeybind == "" {
-		cfg.Client.DetachKeybind = d.Client.DetachKeybind
-	}
-	if cfg.Session.ForwardEnv == nil {
-		cfg.Session.ForwardEnv = d.Session.ForwardEnv
-	}
-	if cfg.Session.ResizePolicy == "" {
-		cfg.Session.ResizePolicy = d.Session.ResizePolicy
-	}
 }
 
 func DefaultPath() (string, error) {

@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"code.selman.me/hauntty/protocol"
 	"code.selman.me/hauntty/wasm"
+	"github.com/creack/pty"
 )
 
 var feedPool = sync.Pool{

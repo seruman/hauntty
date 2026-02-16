@@ -13,7 +13,7 @@ func TestDefaults(t *testing.T) {
 	assert.Equal(t, cfg.Daemon.DefaultScrollback, uint32(10000))
 	assert.Equal(t, cfg.Daemon.StatePersistence, true)
 	assert.Equal(t, cfg.Daemon.StatePersistenceInterval, 30)
-	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+]")
+	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+;")
 	assert.Equal(t, cfg.Session.DefaultCommand, "")
 	assert.DeepEqual(t, cfg.Session.ForwardEnv, []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"})
 	assert.Equal(t, cfg.Session.ResizePolicy, "smallest")
@@ -38,7 +38,7 @@ default_command = "/bin/zsh"
 	assert.Equal(t, cfg.Session.DefaultCommand, "/bin/zsh")
 	// Other defaults preserved.
 	assert.Equal(t, cfg.Daemon.DefaultScrollback, uint32(10000))
-	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+]")
+	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+;")
 }
 
 func TestLoadOverrides(t *testing.T) {

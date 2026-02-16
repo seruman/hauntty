@@ -5,6 +5,7 @@ import (
 	"net"
 
 	hauntty "code.selman.me/hauntty"
+	"code.selman.me/hauntty/config"
 	"code.selman.me/hauntty/protocol"
 )
 
@@ -14,7 +15,7 @@ type Client struct {
 }
 
 func Connect(socketPath string) (*Client, error) {
-	sock := protocol.SocketPathFrom(socketPath)
+	sock := config.SocketPathFrom(socketPath)
 	nc, err := net.Dial("unix", sock)
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w", err)

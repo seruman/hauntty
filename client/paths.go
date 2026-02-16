@@ -3,11 +3,11 @@ package client
 import (
 	"net"
 
-	"code.selman.me/hauntty/protocol"
+	"code.selman.me/hauntty/config"
 )
 
 func DaemonRunning(socketPath string) bool {
-	conn, err := net.Dial("unix", protocol.SocketPathFrom(socketPath))
+	conn, err := net.Dial("unix", config.SocketPathFrom(socketPath))
 	if err != nil {
 		return false
 	}

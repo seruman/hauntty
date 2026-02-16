@@ -13,13 +13,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/BurntSushi/toml"
-	"github.com/alecthomas/kong"
 	hauntty "code.selman.me/hauntty"
 	"code.selman.me/hauntty/client"
 	"code.selman.me/hauntty/config"
 	"code.selman.me/hauntty/daemon"
 	"code.selman.me/hauntty/protocol"
+	"github.com/BurntSushi/toml"
+	"github.com/alecthomas/kong"
 )
 
 type CLI struct {
@@ -446,7 +446,7 @@ func ensureDaemon(socketPath string) error {
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
 	}
-	dir := filepath.Dir(protocol.SocketPath())
+	dir := filepath.Dir(config.SocketPath())
 	os.MkdirAll(dir, 0o700)
 	logFile, err := os.CreateTemp(dir, "hauntty-server-*.log")
 	if err != nil {
@@ -462,12 +462,12 @@ func ensureDaemon(socketPath string) error {
 		os.Remove(logFile.Name())
 		return fmt.Errorf("start daemon: %w", err)
 	}
-	finalPath := protocol.LogPath(cmd.Process.Pid)
+	finalPath := config.LogPath(cmd.Process.Pid)
 	os.Rename(logFile.Name(), finalPath)
 	logFile.Close()
 	cmd.Process.Release()
 
-	sock := protocol.SocketPathFrom(socketPath)
+	sock := config.SocketPathFrom(socketPath)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		conn, err := net.Dial("unix", sock)

@@ -49,8 +49,8 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy string) (*S
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Server{
-		socketPath:        protocol.SocketPathFrom(cfg.SocketPath),
-		pidPath:           protocol.PIDPathFrom(cfg.SocketPath),
+		socketPath:        config.SocketPathFrom(cfg.SocketPath),
+		pidPath:           config.PIDPathFrom(cfg.SocketPath),
 		sessions:          make(map[string]*Session),
 		wasmRT:            rt,
 		ctx:               ctx,
