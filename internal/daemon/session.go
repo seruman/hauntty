@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"code.selman.me/hauntty/protocol"
-	"code.selman.me/hauntty/wasm"
+	"code.selman.me/hauntty/internal/protocol"
+	"code.selman.me/hauntty/libghostty"
 	"github.com/creack/pty"
 )
 
@@ -53,7 +53,7 @@ type Session struct {
 	mu           sync.Mutex
 	ptmx         *os.File
 	cmd          *exec.Cmd
-	term         *wasm.Terminal
+	term         *libghostty.Terminal
 	clients      []*attachedClient
 	clientMu     sync.Mutex
 	feedCh       chan *[]byte
@@ -78,7 +78,7 @@ func resolveCommand(command []string, env []string) []string {
 	return []string{"/bin/sh"}
 }
 
-func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, resizePolicy string, cwd string) (*Session, error) {
+func newSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *libghostty.Runtime, resizePolicy string, cwd string) (*Session, error) {
 	env = mergeEnv(os.Environ(), env)
 	command = resolveCommand(command, env)
 
@@ -139,7 +139,7 @@ func newSession(ctx context.Context, name string, command []string, env []string
 	return s, nil
 }
 
-func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *wasm.Runtime, state *SessionState, resizePolicy string, cwd string) (*Session, error) {
+func restoreSession(ctx context.Context, name string, command []string, env []string, cols, rows, xpixel, ypixel uint16, scrollback uint32, wasmRT *libghostty.Runtime, state *SessionState, resizePolicy string, cwd string) (*Session, error) {
 	env = mergeEnv(os.Environ(), env)
 
 	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
@@ -269,7 +269,7 @@ func (s *Session) readLoop(ctx context.Context) {
 }
 
 func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string) (*attachedClient, error) {
-	dump, err := s.term.DumpScreen(ctx, wasm.DumpVTFull)
+	dump, err := s.term.DumpScreen(ctx, libghostty.DumpVTFull)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +422,7 @@ func (s *Session) resize(ctx context.Context, cols, rows, xpixel, ypixel uint16)
 	return nil
 }
 
-func (s *Session) dumpScreen(ctx context.Context, format uint32) (*wasm.ScreenDump, error) {
+func (s *Session) dumpScreen(ctx context.Context, format uint32) (*libghostty.ScreenDump, error) {
 	return s.term.DumpScreen(ctx, format)
 }
 

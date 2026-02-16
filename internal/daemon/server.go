@@ -18,10 +18,9 @@ import (
 	"time"
 
 	hauntty "code.selman.me/hauntty"
-	"code.selman.me/hauntty/config"
-	"code.selman.me/hauntty/namegen"
-	"code.selman.me/hauntty/protocol"
-	"code.selman.me/hauntty/wasm"
+	"code.selman.me/hauntty/internal/config"
+	"code.selman.me/hauntty/internal/protocol"
+	"code.selman.me/hauntty/libghostty"
 	"golang.org/x/sys/unix"
 )
 
@@ -30,7 +29,7 @@ type Server struct {
 	pidPath           string
 	sessions          map[string]*Session
 	mu                sync.RWMutex
-	wasmRT            *wasm.Runtime
+	wasmRT            *libghostty.Runtime
 	ctx               context.Context
 	cancel            context.CancelFunc
 	listener          net.Listener
@@ -43,7 +42,7 @@ type Server struct {
 }
 
 func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy string) (*Server, error) {
-	rt, err := wasm.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: init wasm runtime: %w", err)
 	}
@@ -253,7 +252,7 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		for k := range s.sessions {
 			existing[k] = true
 		}
-		name = namegen.GenerateUnique(existing)
+		name = generateUniqueName(existing)
 	}
 	sess := s.sessions[name]
 	s.mu.RUnlock()
@@ -465,15 +464,15 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	}
 
 	// Map protocol format to WASM format, preserving flag bits.
-	flags := uint32(msg.Format) & ^wasm.DumpFormatMask
+	flags := uint32(msg.Format) & ^libghostty.DumpFormatMask
 	var wasmFmt uint32
 	switch msg.Format & protocol.DumpFormatMask {
 	case protocol.DumpVT:
-		wasmFmt = wasm.DumpVTSafe
+		wasmFmt = libghostty.DumpVTSafe
 	case protocol.DumpHTML:
-		wasmFmt = wasm.DumpHTML
+		wasmFmt = libghostty.DumpHTML
 	default:
-		wasmFmt = wasm.DumpPlain
+		wasmFmt = libghostty.DumpPlain
 	}
 	wasmFmt |= flags
 

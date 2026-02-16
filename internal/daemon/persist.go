@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"code.selman.me/hauntty/protocol"
-	"code.selman.me/hauntty/wasm"
+	"code.selman.me/hauntty/internal/protocol"
+	"code.selman.me/hauntty/libghostty"
 )
 
 // State file format: [HTST magic 4B][version u8][cols u16][rows u16]
@@ -82,7 +82,7 @@ func (p *Persister) saveAll() {
 }
 
 func (p *Persister) SaveSession(name string, s *Session) error {
-	dump, err := s.dumpScreen(p.ctx, wasm.DumpVTFull)
+	dump, err := s.dumpScreen(p.ctx, libghostty.DumpVTFull)
 	if err != nil {
 		return fmt.Errorf("persist: dump screen: %w", err)
 	}

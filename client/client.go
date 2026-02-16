@@ -6,8 +6,8 @@ import (
 	"net"
 
 	hauntty "code.selman.me/hauntty"
-	"code.selman.me/hauntty/config"
-	"code.selman.me/hauntty/protocol"
+	"code.selman.me/hauntty/internal/config"
+	"code.selman.me/hauntty/internal/protocol"
 )
 
 type Client struct {

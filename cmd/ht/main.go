@@ -16,9 +16,9 @@ import (
 
 	hauntty "code.selman.me/hauntty"
 	"code.selman.me/hauntty/client"
-	"code.selman.me/hauntty/config"
-	"code.selman.me/hauntty/daemon"
-	"code.selman.me/hauntty/protocol"
+	"code.selman.me/hauntty/internal/config"
+	"code.selman.me/hauntty/internal/daemon"
+	"code.selman.me/hauntty/internal/protocol"
 	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
 )

@@ -1,4 +1,4 @@
-package namegen
+package daemon
 
 import (
 	"fmt"
@@ -23,21 +23,19 @@ var nouns = []string{
 	"peak", "keep", "den", "maze", "well",
 }
 
-func Generate() string {
+func generateName() string {
 	adj := adjectives[rand.IntN(len(adjectives))]
 	noun := nouns[rand.IntN(len(nouns))]
 	return adj + "-" + noun
 }
 
-// Retries up to 100 times, then appends a random digit suffix.
-func GenerateUnique(existing map[string]bool) string {
+func generateUniqueName(existing map[string]bool) string {
 	for range 100 {
-		name := Generate()
+		name := generateName()
 		if !existing[name] {
 			return name
 		}
 	}
-	// Exhausted retries; append a random suffix.
-	name := Generate()
+	name := generateName()
 	return fmt.Sprintf("%s-%d", name, rand.IntN(1000))
 }

@@ -35,10 +35,10 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
-    // Copy WASM to ../wasm/ for go:embed.
+    // Copy WASM to ../libghostty/ for go:embed.
     const copy = b.addSystemCommand(&.{"cp"});
     copy.addFileArg(exe.getEmittedBin());
-    copy.addArg(b.pathFromRoot("../wasm/hauntty-vt.wasm"));
+    copy.addArg(b.pathFromRoot("../libghostty/hauntty-vt.wasm"));
     b.getInstallStep().dependOn(&copy.step);
 }
 
