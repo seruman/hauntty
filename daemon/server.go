@@ -190,7 +190,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 
 		switch m := msg.(type) {
 		case *protocol.Attach:
-			attached, ac, err = s.handleAttach(conn, netConn.Close, m)
+			attached, ac, err = s.handleAttach(conn, netConn.Close, m, clientRev)
 			if err != nil {
 				slog.Debug("attach error", "err", err)
 				return
@@ -242,7 +242,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 	}
 }
 
-func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach) (*Session, *attachedClient, error) {
+func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach, clientRev string) (*Session, *attachedClient, error) {
 	name := msg.Name
 
 	s.mu.RLock()
@@ -322,7 +322,7 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		return nil, nil, err
 	}
 
-	ac, aerr := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel)
+	ac, aerr := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, clientRev)
 	if aerr != nil {
 		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: aerr.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
@@ -525,6 +525,7 @@ func (s *Server) handleStatus(conn *protocol.Conn, msg *protocol.Status) {
 			SocketPath:   s.socketPath,
 			RunningCount: runningCount,
 			DeadCount:    deadCount,
+			Version:      hauntty.Version(),
 		},
 		Session: ss,
 	}
@@ -567,17 +568,22 @@ func (s *Server) statusSnapshot(sessionName string) (map[string]bool, uint32, ui
 
 	sess.clientMu.Lock()
 	clientCount := uint32(len(sess.clients))
+	clientVersions := make([]string, 0, len(sess.clients))
+	for _, ac := range sess.clients {
+		clientVersions = append(clientVersions, ac.version)
+	}
 	sess.clientMu.Unlock()
 
 	cols, rows := sess.size()
 	ss := &protocol.SessionStatus{
-		Name:        sess.Name,
-		State:       state,
-		Cols:        cols,
-		Rows:        rows,
-		PID:         sess.PID,
-		CWD:         sess.term.GetPwd(ctx),
-		ClientCount: clientCount,
+		Name:           sess.Name,
+		State:          state,
+		Cols:           cols,
+		Rows:           rows,
+		PID:            sess.PID,
+		CWD:            sess.term.GetPwd(ctx),
+		ClientCount:    clientCount,
+		ClientVersions: clientVersions,
 	}
 	return running, runningCount, deadCount, ss
 }

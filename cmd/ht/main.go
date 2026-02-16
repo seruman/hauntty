@@ -251,6 +251,7 @@ func (cmd *StatusCmd) Run(cfg *config.Config) error {
 
 	d := resp.Daemon
 	fmt.Printf("daemon:   running (pid %d, uptime %s)\n", d.PID, formatUptime(d.Uptime))
+	fmt.Printf("version:  client=%s server=%s\n", hauntty.Version(), d.Version)
 	fmt.Printf("socket:   %s\n", d.SocketPath)
 	fmt.Printf("sessions: %d running, %d dead\n", d.RunningCount, d.DeadCount)
 
@@ -267,6 +268,9 @@ func (cmd *StatusCmd) Run(cfg *config.Config) error {
 		fmt.Printf("cwd:      %s\n", cwd)
 		fmt.Printf("pid:      %d\n", s.PID)
 		fmt.Printf("clients:  %d\n", s.ClientCount)
+		for i, v := range s.ClientVersions {
+			fmt.Printf("  [%d]:    %s\n", i, v)
+		}
 	}
 
 	return nil

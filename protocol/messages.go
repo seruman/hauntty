@@ -606,16 +606,18 @@ type DaemonStatus struct {
 	SocketPath   string
 	RunningCount uint32
 	DeadCount    uint32
+	Version      string
 }
 
 type SessionStatus struct {
-	Name        string
-	State       string
-	Cols        uint16
-	Rows        uint16
-	PID         uint32
-	CWD         string
-	ClientCount uint32
+	Name           string
+	State          string
+	Cols           uint16
+	Rows           uint16
+	PID            uint32
+	CWD            string
+	ClientCount    uint32
+	ClientVersions []string
 }
 
 type StatusResponse struct {
@@ -639,6 +641,9 @@ func (m *StatusResponse) encode(e *Encoder) error {
 		return err
 	}
 	if err := e.WriteU32(m.Daemon.DeadCount); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.Daemon.Version); err != nil {
 		return err
 	}
 	if m.Session == nil {
@@ -665,7 +670,18 @@ func (m *StatusResponse) encode(e *Encoder) error {
 	if err := e.WriteString(m.Session.CWD); err != nil {
 		return err
 	}
-	return e.WriteU32(m.Session.ClientCount)
+	if err := e.WriteU32(m.Session.ClientCount); err != nil {
+		return err
+	}
+	if err := e.WriteU32(uint32(len(m.Session.ClientVersions))); err != nil {
+		return err
+	}
+	for _, v := range m.Session.ClientVersions {
+		if err := e.WriteString(v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *StatusResponse) decode(d *Decoder) error {
@@ -683,6 +699,9 @@ func (m *StatusResponse) decode(d *Decoder) error {
 		return err
 	}
 	if m.Daemon.DeadCount, err = d.ReadU32(); err != nil {
+		return err
+	}
+	if m.Daemon.Version, err = d.ReadString(); err != nil {
 		return err
 	}
 	flag, err := d.ReadU8()
@@ -711,6 +730,18 @@ func (m *StatusResponse) decode(d *Decoder) error {
 	if m.Session.CWD, err = d.ReadString(); err != nil {
 		return err
 	}
-	m.Session.ClientCount, err = d.ReadU32()
-	return err
+	if m.Session.ClientCount, err = d.ReadU32(); err != nil {
+		return err
+	}
+	cvCount, err := d.ReadU32()
+	if err != nil {
+		return err
+	}
+	m.Session.ClientVersions = make([]string, cvCount)
+	for i := range cvCount {
+		if m.Session.ClientVersions[i], err = d.ReadString(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

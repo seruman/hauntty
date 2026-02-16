@@ -23,14 +23,15 @@ var feedPool = sync.Pool{
 }
 
 type attachedClient struct {
-	conn   *protocol.Conn
-	close  func() error
-	cols   uint16
-	rows   uint16
-	xpixel uint16
-	ypixel uint16
-	outCh  chan []byte
-	done   chan struct{}
+	conn    *protocol.Conn
+	close   func() error
+	cols    uint16
+	rows    uint16
+	xpixel  uint16
+	ypixel  uint16
+	version string
+	outCh   chan []byte
+	done    chan struct{}
 }
 
 func (ac *attachedClient) writeLoop() {
@@ -267,7 +268,7 @@ func (s *Session) readLoop(ctx context.Context) {
 	}
 }
 
-func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16) (*attachedClient, error) {
+func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string) (*attachedClient, error) {
 	dump, err := s.term.DumpScreen(ctx, wasm.DumpVTFull)
 	if err != nil {
 		return nil, err
@@ -283,14 +284,15 @@ func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn fun
 	}
 
 	ac := &attachedClient{
-		conn:   conn,
-		close:  closeConn,
-		cols:   cols,
-		rows:   rows,
-		xpixel: xpixel,
-		ypixel: ypixel,
-		outCh:  make(chan []byte, 64),
-		done:   make(chan struct{}),
+		conn:    conn,
+		close:   closeConn,
+		cols:    cols,
+		rows:    rows,
+		xpixel:  xpixel,
+		ypixel:  ypixel,
+		version: version,
+		outCh:   make(chan []byte, 64),
+		done:    make(chan struct{}),
 	}
 	go ac.writeLoop()
 
