@@ -1,7 +1,6 @@
 package wasm_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -11,20 +10,20 @@ import (
 	"code.selman.me/hauntty/wasm"
 )
 
-func newTerminal(t *testing.T, ctx context.Context, rt *wasm.Runtime, cols, rows, scrollback uint32) *wasm.Terminal {
+func newTerminal(t *testing.T, rt *wasm.Runtime, cols, rows, scrollback uint32) *wasm.Terminal {
 	t.Helper()
-	term, err := rt.NewTerminal(ctx, cols, rows, scrollback)
+	term, err := rt.NewTerminal(t.Context(), cols, rows, scrollback)
 	assert.NilError(t, err)
 	return term
 }
 
 func TestBasicFeedAndDump(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	err = term.Feed(ctx, []byte("Hello, World!\r\n"))
@@ -36,12 +35,12 @@ func TestBasicFeedAndDump(t *testing.T) {
 }
 
 func TestResize(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	err = term.Resize(ctx, 120, 40)
@@ -56,12 +55,12 @@ func TestResize(t *testing.T) {
 }
 
 func TestCursorPosition(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
@@ -78,12 +77,12 @@ func TestCursorPosition(t *testing.T) {
 }
 
 func TestAltScreen(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	dump, err := term.DumpScreen(ctx, wasm.DumpVTFull)
@@ -104,15 +103,15 @@ func TestAltScreen(t *testing.T) {
 }
 
 func TestMultipleTerminals(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term1 := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term1 := newTerminal(t, rt, 80, 24, 1000)
 	defer term1.Close(ctx)
 
-	term2 := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term2 := newTerminal(t, rt, 80, 24, 1000)
 	defer term2.Close(ctx)
 
 	err = term1.Feed(ctx, []byte("terminal one"))
@@ -130,13 +129,13 @@ func TestMultipleTerminals(t *testing.T) {
 }
 
 func TestDumpUnwrap(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
 	// 20-col terminal: 30 chars will soft-wrap onto two lines.
-	term := newTerminal(t, ctx, rt, 20, 24, 1000)
+	term := newTerminal(t, rt, 20, 24, 1000)
 	defer term.Close(ctx)
 
 	err = term.Feed(ctx, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
@@ -152,13 +151,13 @@ func TestDumpUnwrap(t *testing.T) {
 }
 
 func TestDumpScrollback(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
 	// 80x5 terminal: 10 lines will push lines 1-6 into scrollback.
-	term := newTerminal(t, ctx, rt, 80, 5, 100)
+	term := newTerminal(t, rt, 80, 5, 100)
 	defer term.Close(ctx)
 
 	for i := 1; i <= 10; i++ {
@@ -180,12 +179,12 @@ func TestDumpScrollback(t *testing.T) {
 }
 
 func TestDumpHTML(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	err = term.Feed(ctx, []byte("Hello"))
@@ -197,12 +196,12 @@ func TestDumpHTML(t *testing.T) {
 }
 
 func TestEncodeKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	t.Run("plain letter", func(t *testing.T) {
@@ -255,12 +254,12 @@ func TestEncodeKey(t *testing.T) {
 }
 
 func TestEncodeKeyKittyMode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	// Push kitty keyboard mode (disambiguate).
@@ -281,12 +280,12 @@ func TestEncodeKeyKittyMode(t *testing.T) {
 }
 
 func TestGetPwd(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
 	assert.Equal(t, term.GetPwd(ctx), "")
@@ -305,18 +304,18 @@ func TestGetPwd(t *testing.T) {
 }
 
 func TestReInit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.NewRuntime(ctx)
 	assert.NilError(t, err)
 	defer rt.Close(ctx)
 
-	term := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term := newTerminal(t, rt, 80, 24, 1000)
 	err = term.Feed(ctx, []byte("first session"))
 	assert.NilError(t, err)
 	err = term.Close(ctx)
 	assert.NilError(t, err)
 
-	term2 := newTerminal(t, ctx, rt, 80, 24, 1000)
+	term2 := newTerminal(t, rt, 80, 24, 1000)
 	defer term2.Close(ctx)
 
 	dump, err := term2.DumpScreen(ctx, wasm.DumpVTFull)
