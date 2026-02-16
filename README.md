@@ -1,6 +1,52 @@
 # hauntty
 
-Terminal session manager. Run persistent sessions that survive disconnects, reattach from anywhere.
+Terminal session persistence. Run sessions that survive disconnects, reattach later.
+
+> [!WARNING]
+> This is a learning project built with heavy LLM assistance. It works for me but I wouldn't trust it for your use cases. You're probably better off using [tmux](https://github.com/tmux/tmux), [zellij](https://github.com/zellij-org/zellij), [shpool](https://github.com/shell-pool/shpool), or [zmx](https://github.com/neurosnap/zmx). Those are mature projects maintained by people who know what they're doing - this is me tinkering.
+
+## Why does this exist
+
+Wanted a lightweight session persistence tool. Used it as an excuse to learn PTY internals without leaving Go. LLM did most of the heavy lifting.
+
+## How it works
+
+A Go daemon manages sessions. Each session runs a shell in a PTY and tracks terminal state using [libghostty/ghostty-vt](https://github.com/ghostty-org/ghostty) compiled to WASM. When you reattach, it reconstructs the screen from that state.
+
+If Ghostty is installed, hauntty injects its shell integration scripts.
+
+The client (`ht`) talks to the daemon over a Unix socket.
+
+## Usage
+
+```bash
+ht attach work           # attach to session (creates if needed)
+ht attach build -- make  # run a command in a session
+ht list                  # list sessions
+ht kill work             # kill a session
+# detach with ctrl+;
+```
+
+Daemon starts on first attach. Sessions persist until killed or the shell exits.
+
+## Commands
+
+```
+attach (a)    Attach to a session, create if needed
+list (ls)     List sessions
+kill          Kill a session
+send          Send input to a session without attaching
+dump          Dump session screen contents
+detach        Detach from current session
+wait          Wait for output to match a pattern
+status (st)   Show daemon and session status
+prune         Delete dead session state files
+init          Create default config file
+config        Print current configuration
+daemon        Start daemon in foreground
+```
+
+Run `ht <command> --help` for details.
 
 ## Install
 
@@ -8,46 +54,31 @@ Terminal session manager. Run persistent sessions that survive disconnects, reat
 go install code.selman.me/hauntty/cmd/ht@latest
 ```
 
-## Usage
-
-```bash
-# Attach to a session (creates it if it doesn't exist)
-ht attach my-session
-
-# Attach with a specific command
-ht attach build -- make -j8
-
-# Detach with ctrl+; (default keybind)
-
-# List sessions
-ht list
-
-# Reattach
-ht attach my-session
-
-# Show status
-ht status
-
-# Kill a session
-ht kill my-session
-```
-
-The daemon starts automatically on first attach. Sessions persist until explicitly killed or the process exits.
-
-## Configuration
-
-```bash
-# Create default config
-ht init
-
-# Print effective config
-ht config
-```
-
-Config lives at `$XDG_CONFIG_HOME/hauntty/config.toml` (default `~/.config/hauntty/config.toml`).
-
 ## Building
 
 ```
 go build -o ht ./cmd/ht
 ```
+
+## Config
+
+`~/.config/hauntty/config.toml` - run `ht init` to create it.
+
+## Environment
+
+Forwarded from client to session:
+- `TERM`, `SHELL` (always)
+- `COLORTERM`, `GHOSTTY_RESOURCES_DIR`, `GHOSTTY_BIN_DIR` (default config)
+
+Configure `forward_env` in config to change. Pass `--env KEY` for one-off.
+
+Set by hauntty:
+- `HAUNTTY_SESSION` - session name, set inside sessions
+- `HAUNTTY_SOCKET` - socket path override for client commands
+
+## Prior art
+
+- [Ghostty](https://github.com/ghostty-org/ghostty)
+- [shpool](https://github.com/shell-pool/shpool)
+- [zmx](https://github.com/neurosnap/zmx)
+- [abduco](https://github.com/martanne/abduco)
