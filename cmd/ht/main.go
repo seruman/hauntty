@@ -22,18 +22,20 @@ import (
 )
 
 type CLI struct {
-	Socket string    `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
-	Attach AttachCmd `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
-	List   ListCmd   `cmd:"" aliases:"ls" help:"List sessions."`
-	Kill   KillCmd   `cmd:"" help:"Kill a session."`
-	Send   SendCmd   `cmd:"" help:"Send input to a session."`
-	Dump   DumpCmd   `cmd:"" help:"Dump session contents."`
-	Detach DetachCmd `cmd:"" help:"Detach from current session."`
-	Wait   WaitCmd   `cmd:"" help:"Wait for session output to match a pattern."`
-	Status StatusCmd `cmd:"" aliases:"st" help:"Show daemon and session status."`
-	Prune  PruneCmd  `cmd:"" help:"Delete dead session state files."`
-	Config ConfigCmd `cmd:"" help:"Print effective configuration."`
-	Daemon DaemonCmd `cmd:"" help:"Start daemon in foreground."`
+	Version kong.VersionFlag `help:"Print version."`
+	Socket  string           `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
+	Attach  AttachCmd        `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
+	List    ListCmd          `cmd:"" aliases:"ls" help:"List sessions."`
+	Kill    KillCmd          `cmd:"" help:"Kill a session."`
+	Send    SendCmd          `cmd:"" help:"Send input to a session."`
+	Dump    DumpCmd          `cmd:"" help:"Dump session contents."`
+	Detach  DetachCmd        `cmd:"" help:"Detach from current session."`
+	Wait    WaitCmd          `cmd:"" help:"Wait for session output to match a pattern."`
+	Status  StatusCmd        `cmd:"" aliases:"st" help:"Show daemon and session status."`
+	Prune   PruneCmd         `cmd:"" help:"Delete dead session state files."`
+	Init    InitCmd          `cmd:"" help:"Create default config file."`
+	Config  ConfigCmd        `cmd:"" help:"Print effective configuration."`
+	Daemon  DaemonCmd        `cmd:"" help:"Start daemon in foreground."`
 }
 
 type AttachCmd struct {
@@ -359,6 +361,36 @@ func (cmd *PruneCmd) Run(cfg *config.Config) error {
 	} else {
 		fmt.Printf("pruned %d dead session(s)\n", count)
 	}
+	return nil
+}
+
+type InitCmd struct{}
+
+func (cmd *InitCmd) Run(_ *config.Config) error {
+	path, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("config already exists: %s", path)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create config file: %w", err)
+	}
+	defer f.Close()
+
+	if err := toml.NewEncoder(f).Encode(config.Default()); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	fmt.Printf("created %s\n", path)
 	return nil
 }
 

@@ -52,7 +52,7 @@ func Default() *Config {
 
 // Returns defaults without error if the file does not exist.
 func Load() (*Config, error) {
-	path, err := defaultPath()
+	path, err := DefaultPath()
 	if err != nil {
 		return Default(), nil
 	}
@@ -94,7 +94,7 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
-func defaultPath() (string, error) {
+func DefaultPath() (string, error) {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
 		return filepath.Join(dir, "hauntty", "config.toml"), nil
 	}
