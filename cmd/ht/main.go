@@ -42,6 +42,10 @@ type AttachCmd struct {
 }
 
 func (cmd *AttachCmd) Run(cfg *config.Config) error {
+	if s := os.Getenv("HAUNTTY_SESSION"); s != "" {
+		return fmt.Errorf("already inside session %q, nested sessions are not supported", s)
+	}
+
 	dk, err := client.ParseDetachKey(cfg.Client.DetachKeybind)
 	if err != nil {
 		return fmt.Errorf("invalid detach_keybind %q: %w", cfg.Client.DetachKeybind, err)
