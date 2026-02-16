@@ -5,7 +5,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
-	"github.com/selman/hauntty/wasm"
+	"code.selman.me/hauntty/wasm"
 )
 
 func TestParseKeyNotation(t *testing.T) {

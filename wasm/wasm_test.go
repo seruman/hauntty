@@ -8,7 +8,7 @@ import (
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/golden"
 
-	"github.com/selman/hauntty/wasm"
+	"code.selman.me/hauntty/wasm"
 )
 
 func newTerminal(t *testing.T, ctx context.Context, rt *wasm.Runtime, cols, rows, scrollback uint32) *wasm.Terminal {

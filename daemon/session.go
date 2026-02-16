@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/selman/hauntty/protocol"
-	"github.com/selman/hauntty/wasm"
+	"code.selman.me/hauntty/protocol"
+	"code.selman.me/hauntty/wasm"
 )
 
 var feedPool = sync.Pool{

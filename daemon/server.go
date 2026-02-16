@@ -16,11 +16,11 @@ import (
 	"syscall"
 	"time"
 
-	hauntty "github.com/selman/hauntty"
-	"github.com/selman/hauntty/config"
-	"github.com/selman/hauntty/namegen"
-	"github.com/selman/hauntty/protocol"
-	"github.com/selman/hauntty/wasm"
+	hauntty "code.selman.me/hauntty"
+	"code.selman.me/hauntty/config"
+	"code.selman.me/hauntty/namegen"
+	"code.selman.me/hauntty/protocol"
+	"code.selman.me/hauntty/wasm"
 	"golang.org/x/sys/unix"
 )
 

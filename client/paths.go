@@ -3,7 +3,7 @@ package client
 import (
 	"net"
 
-	"github.com/selman/hauntty/protocol"
+	"code.selman.me/hauntty/protocol"
 )
 
 func DaemonRunning(socketPath string) bool {

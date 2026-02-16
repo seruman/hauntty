@@ -15,11 +15,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
-	hauntty "github.com/selman/hauntty"
-	"github.com/selman/hauntty/client"
-	"github.com/selman/hauntty/config"
-	"github.com/selman/hauntty/daemon"
-	"github.com/selman/hauntty/protocol"
+	hauntty "code.selman.me/hauntty"
+	"code.selman.me/hauntty/client"
+	"code.selman.me/hauntty/config"
+	"code.selman.me/hauntty/daemon"
+	"code.selman.me/hauntty/protocol"
 )
 
 type CLI struct {

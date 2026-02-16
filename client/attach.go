@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/selman/hauntty/protocol"
+	"code.selman.me/hauntty/protocol"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )

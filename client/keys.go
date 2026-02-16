@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/selman/hauntty/wasm"
+	"code.selman.me/hauntty/wasm"
 )
 
 type KeyInput struct {

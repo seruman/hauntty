@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/selman/hauntty/protocol"
-	"github.com/selman/hauntty/wasm"
+	"code.selman.me/hauntty/protocol"
+	"code.selman.me/hauntty/wasm"
 )
 
 // State file format: [HTST magic 4B][version u8][cols u16][rows u16]

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net"
 
-	hauntty "github.com/selman/hauntty"
-	"github.com/selman/hauntty/protocol"
+	hauntty "code.selman.me/hauntty"
+	"code.selman.me/hauntty/protocol"
 )
 
 type Client struct {
