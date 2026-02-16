@@ -62,6 +62,9 @@ func (e *Encoder) WriteString(v string) error {
 	if err := e.WriteU16(uint16(len(v))); err != nil {
 		return err
 	}
+	if len(v) == 0 {
+		return nil
+	}
 	_, err := io.WriteString(e.w, v)
 	return err
 }
@@ -69,6 +72,9 @@ func (e *Encoder) WriteString(v string) error {
 func (e *Encoder) WriteBytes(v []byte) error {
 	if err := e.WriteU32(uint32(len(v))); err != nil {
 		return err
+	}
+	if len(v) == 0 {
+		return nil
 	}
 	_, err := e.w.Write(v)
 	return err
