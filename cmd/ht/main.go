@@ -37,7 +37,8 @@ type CLI struct {
 	Prune   PruneCmd         `cmd:"" help:"Delete dead session state files."`
 	Init    InitCmd          `cmd:"" help:"Create default config file."`
 	Config  ConfigCmd        `cmd:"" help:"Print effective configuration."`
-	Daemon  DaemonCmd        `cmd:"" help:"Start daemon in foreground."`
+	Daemon     DaemonCmd     `cmd:"" help:"Start daemon in foreground."`
+	Completion CompletionCmd `cmd:"" help:"Generate shell completion script."`
 }
 
 type AttachCmd struct {
