@@ -24,20 +24,21 @@ import (
 )
 
 type CLI struct {
-	Version kong.VersionFlag `help:"Print version."`
-	Socket  string           `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
-	Attach  AttachCmd        `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
-	List    ListCmd          `cmd:"" aliases:"ls" help:"List sessions."`
-	Kill    KillCmd          `cmd:"" help:"Kill a session."`
-	Send    SendCmd          `cmd:"" help:"Send input to a session."`
-	Dump    DumpCmd          `cmd:"" help:"Dump session contents."`
-	Detach  DetachCmd        `cmd:"" help:"Detach from current session."`
-	Wait    WaitCmd          `cmd:"" help:"Wait for session output to match a pattern."`
-	Status  StatusCmd        `cmd:"" aliases:"st" help:"Show daemon and session status."`
-	Prune   PruneCmd         `cmd:"" help:"Delete dead session state files."`
-	Init    InitCmd          `cmd:"" help:"Create default config file."`
-	Config  ConfigCmd        `cmd:"" help:"Print effective configuration."`
-	Daemon  DaemonCmd        `cmd:"" help:"Start daemon in foreground."`
+	Version    kong.VersionFlag `help:"Print version."`
+	Socket     string           `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
+	Attach     AttachCmd        `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
+	List       ListCmd          `cmd:"" aliases:"ls" help:"List sessions."`
+	Kill       KillCmd          `cmd:"" help:"Kill a session."`
+	Send       SendCmd          `cmd:"" help:"Send input to a session."`
+	Dump       DumpCmd          `cmd:"" help:"Dump session contents."`
+	Detach     DetachCmd        `cmd:"" help:"Detach from current session."`
+	Wait       WaitCmd          `cmd:"" help:"Wait for session output to match a pattern."`
+	Status     StatusCmd        `cmd:"" aliases:"st" help:"Show daemon and session status."`
+	Prune      PruneCmd         `cmd:"" help:"Delete dead session state files."`
+	Init       InitCmd          `cmd:"" help:"Create default config file."`
+	Config     ConfigCmd        `cmd:"" help:"Print effective configuration."`
+	Daemon     DaemonCmd        `cmd:"" help:"Start daemon in foreground."`
+	Completion CompletionCmd    `cmd:"" help:"Generate shell completion script."`
 }
 
 type AttachCmd struct {
