@@ -18,14 +18,17 @@ require (
 	golang.org/x/telemetry v0.0.0-20260209163413-e7419c687ee4 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	honnef.co/go/tools v0.6.1 // indirect
+	mvdan.cc/gofumpt v0.9.2 // indirect
 )
 
 require (
-	github.com/google/go-cmp v0.6.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	gotest.tools/v3 v3.5.2
 )
 
 tool (
 	golang.org/x/tools/cmd/deadcode
+	golang.org/x/tools/cmd/goimports
 	honnef.co/go/tools/cmd/staticcheck
+	mvdan.cc/gofumpt
 )
