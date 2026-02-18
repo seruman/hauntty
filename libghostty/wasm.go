@@ -27,6 +27,8 @@ type Runtime struct {
 }
 
 func NewRuntime(ctx context.Context) (*Runtime, error) {
+	// TODO: can be set-up in init once, or lazy-initialized on first use.
+
 	rt := wazero.NewRuntime(ctx)
 
 	_, err := rt.NewHostModuleBuilder("env").
@@ -197,53 +199,78 @@ type ScreenDump struct {
 	IsAltScreen bool
 }
 
-const (
-	DumpPlain          uint32 = 0    // Plain text, no escape sequences.
-	DumpVTFull         uint32 = 1    // Full VT with all extras (for reattach).
-	DumpVTSafe         uint32 = 2    // Safe VT — colors but no palette/mode corruption.
-	DumpHTML           uint32 = 3    // HTML with inline CSS colors.
-	DumpFlagUnwrap     uint32 = 0x10 // Bit 4: join soft-wrapped lines.
-	DumpFlagScrollback uint32 = 0x20 // Bit 5: include scrollback history.
-	DumpFormatMask     uint32 = 0x0F // Bits 0-3: format selector.
-)
+type DumpFormat uint32
 
 const (
-	KeyEnter     uint32 = 0x100
-	KeyEscape    uint32 = 0x101
-	KeyTab       uint32 = 0x102
-	KeyBackspace uint32 = 0x103
-	KeyUp        uint32 = 0x110
-	KeyDown      uint32 = 0x111
-	KeyLeft      uint32 = 0x112
-	KeyRight     uint32 = 0x113
-	KeyHome      uint32 = 0x120
-	KeyEnd       uint32 = 0x121
-	KeyPageUp    uint32 = 0x122
-	KeyPageDown  uint32 = 0x123
-	KeyInsert    uint32 = 0x124
-	KeyDelete    uint32 = 0x125
-	KeyF1        uint32 = 0x130
-	KeyF2        uint32 = 0x131
-	KeyF3        uint32 = 0x132
-	KeyF4        uint32 = 0x133
-	KeyF5        uint32 = 0x134
-	KeyF6        uint32 = 0x135
-	KeyF7        uint32 = 0x136
-	KeyF8        uint32 = 0x137
-	KeyF9        uint32 = 0x138
-	KeyF10       uint32 = 0x139
-	KeyF11       uint32 = 0x13A
-	KeyF12       uint32 = 0x13B
+	DumpPlain          DumpFormat = 0    // Plain text, no escape sequences.
+	DumpVTFull         DumpFormat = 1    // Full VT with all extras (for reattach).
+	DumpVTSafe         DumpFormat = 2    // Safe VT — colors but no palette/mode corruption.
+	DumpHTML           DumpFormat = 3    // HTML with inline CSS colors.
+	DumpFlagUnwrap     DumpFormat = 0x10 // Bit 4: join soft-wrapped lines.
+	DumpFlagScrollback DumpFormat = 0x20 // Bit 5: include scrollback history.
+	DumpFormatMask     DumpFormat = 0x0F // Bits 0-3: format selector.
 )
+
+type KeyCode uint32
 
 const (
-	ModShift uint32 = 0x01
-	ModCtrl  uint32 = 0x02
-	ModAlt   uint32 = 0x04
-	ModSuper uint32 = 0x08
+	KeyEnter     KeyCode = 0x100
+	KeyEscape    KeyCode = 0x101
+	KeyTab       KeyCode = 0x102
+	KeyBackspace KeyCode = 0x103
+	KeyUp        KeyCode = 0x110
+	KeyDown      KeyCode = 0x111
+	KeyLeft      KeyCode = 0x112
+	KeyRight     KeyCode = 0x113
+	KeyHome      KeyCode = 0x120
+	KeyEnd       KeyCode = 0x121
+	KeyPageUp    KeyCode = 0x122
+	KeyPageDown  KeyCode = 0x123
+	KeyInsert    KeyCode = 0x124
+	KeyDelete    KeyCode = 0x125
+	KeyF1        KeyCode = 0x130
+	KeyF2        KeyCode = 0x131
+	KeyF3        KeyCode = 0x132
+	KeyF4        KeyCode = 0x133
+	KeyF5        KeyCode = 0x134
+	KeyF6        KeyCode = 0x135
+	KeyF7        KeyCode = 0x136
+	KeyF8        KeyCode = 0x137
+	KeyF9        KeyCode = 0x138
+	KeyF10       KeyCode = 0x139
+	KeyF11       KeyCode = 0x13A
+	KeyF12       KeyCode = 0x13B
 )
 
-func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, error) {
+type Modifier uint32
+
+const (
+	ModShift Modifier = 0x01
+	ModCtrl  Modifier = 0x02
+	ModAlt   Modifier = 0x04
+	ModSuper Modifier = 0x08
+)
+
+// readResult reads the result buffer after a WASM call that writes its
+// output to the shared dump pointer. Must be called with t.mu held.
+func (t *Terminal) readResult(ctx context.Context, length int32) ([]byte, error) {
+	if length <= 0 {
+		return nil, nil
+	}
+	results, err := t.gxDumpPtr.Call(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("wasm: gx_dump_ptr: %w", err)
+	}
+	buf, ok := t.mod.Memory().Read(uint32(results[0]), uint32(length))
+	if !ok {
+		return nil, fmt.Errorf("wasm: memory read failed")
+	}
+	out := make([]byte, len(buf))
+	copy(out, buf)
+	return out, nil
+}
+
+func (t *Terminal) DumpScreen(ctx context.Context, format DumpFormat) (*ScreenDump, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -256,20 +283,9 @@ func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, 
 		return nil, fmt.Errorf("wasm: gx_dump_screen returned %d", length)
 	}
 
-	results, err = t.gxDumpPtr.Call(ctx)
+	vt, err := t.readResult(ctx, length)
 	if err != nil {
-		return nil, fmt.Errorf("wasm: gx_dump_ptr: %w", err)
-	}
-	ptr := uint32(results[0])
-
-	var vt []byte
-	if length > 0 {
-		buf, ok := t.mod.Memory().Read(ptr, uint32(length))
-		if !ok {
-			return nil, fmt.Errorf("wasm: reading dump buffer failed")
-		}
-		vt = make([]byte, len(buf))
-		copy(vt, buf)
+		return nil, err
 	}
 
 	// Packed cursor: col | row<<16.
@@ -295,7 +311,7 @@ func (t *Terminal) DumpScreen(ctx context.Context, format uint32) (*ScreenDump, 
 	}, nil
 }
 
-func (t *Terminal) EncodeKey(ctx context.Context, keyCode, mods uint32) ([]byte, error) {
+func (t *Terminal) EncodeKey(ctx context.Context, keyCode KeyCode, mods Modifier) ([]byte, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -307,23 +323,8 @@ func (t *Terminal) EncodeKey(ctx context.Context, keyCode, mods uint32) ([]byte,
 	if length < 0 {
 		return nil, fmt.Errorf("wasm: gx_encode_key returned %d", length)
 	}
-	if length == 0 {
-		return nil, nil
-	}
 
-	results, err = t.gxDumpPtr.Call(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("wasm: gx_dump_ptr: %w", err)
-	}
-	ptr := uint32(results[0])
-
-	buf, ok := t.mod.Memory().Read(ptr, uint32(length))
-	if !ok {
-		return nil, fmt.Errorf("wasm: reading encode buffer failed")
-	}
-	out := make([]byte, len(buf))
-	copy(out, buf)
-	return out, nil
+	return t.readResult(ctx, length)
 }
 
 func (t *Terminal) GetPwd(ctx context.Context) string {

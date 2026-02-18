@@ -1,0 +1,4 @@
+$ printf 'alpha\nbeta\n'
+alpha
+beta
+$

@@ -426,7 +426,7 @@ func (s *Session) resize(ctx context.Context, cols, rows, xpixel, ypixel uint16)
 	return nil
 }
 
-func (s *Session) dumpScreen(ctx context.Context, format uint32) (*libghostty.ScreenDump, error) {
+func (s *Session) dumpScreen(ctx context.Context, format libghostty.DumpFormat) (*libghostty.ScreenDump, error) {
 	return s.term.DumpScreen(ctx, format)
 }
 

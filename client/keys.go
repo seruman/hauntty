@@ -8,8 +8,8 @@ import (
 )
 
 type KeyInput struct {
-	Code uint32
-	Mods uint32
+	Code libghostty.KeyCode
+	Mods libghostty.Modifier
 }
 
 func ParseKeyNotation(notation string) (KeyInput, error) {
@@ -17,7 +17,7 @@ func ParseKeyNotation(notation string) (KeyInput, error) {
 
 	parts := strings.Split(notation, "+")
 
-	var mods uint32
+	var mods libghostty.Modifier
 	keyPart := parts[len(parts)-1]
 	for _, mod := range parts[:len(parts)-1] {
 		switch mod {
@@ -42,7 +42,7 @@ func ParseKeyNotation(notation string) (KeyInput, error) {
 	return KeyInput{Code: code, Mods: mods}, nil
 }
 
-func parseKeyName(name string) (uint32, error) {
+func parseKeyName(name string) (libghostty.KeyCode, error) {
 	switch name {
 	case "enter", "return":
 		return libghostty.KeyEnter, nil
@@ -53,7 +53,7 @@ func parseKeyName(name string) (uint32, error) {
 	case "backspace":
 		return libghostty.KeyBackspace, nil
 	case "space":
-		return uint32(' '), nil
+		return libghostty.KeyCode(' '), nil
 	case "up":
 		return libghostty.KeyUp, nil
 	case "down":
@@ -103,7 +103,7 @@ func parseKeyName(name string) (uint32, error) {
 	if len(name) == 1 {
 		ch := name[0]
 		if ch >= 0x20 && ch <= 0x7e {
-			return uint32(ch), nil
+			return libghostty.KeyCode(ch), nil
 		}
 	}
 
@@ -139,7 +139,7 @@ func ParseDetachKey(notation string) (DetachKey, error) {
 	if ki.Mods&libghostty.ModSuper != 0 {
 		kittyMods += 8
 	}
-	raw := byte(ki.Code & 0x1f)
+	raw := byte(uint32(ki.Code) & 0x1f)
 	if raw == 0x1b {
 		// The raw ctrl byte collides with ESC (e.g. ctrl+; or ctrl+[).
 		// Only match the CSI u sequence from the kitty keyboard protocol.

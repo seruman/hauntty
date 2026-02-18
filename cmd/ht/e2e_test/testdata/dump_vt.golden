@@ -1,0 +1,4 @@
+sh-3.2$ printf 'fmt-line-1\nfmt-line-2\n'
+fmt-line-1
+fmt-line-2
+sh-3.2$ [0m

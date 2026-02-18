@@ -8,6 +8,7 @@ import (
 	hauntty "code.selman.me/hauntty"
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
+	"code.selman.me/hauntty/libghostty"
 )
 
 type Client struct {
@@ -136,8 +137,8 @@ func (c *Client) Send(name string, data []byte) error {
 	}
 }
 
-func (c *Client) SendKey(name string, keyCode, mods uint32) error {
-	if err := c.conn.WriteMessage(&protocol.SendKey{Name: name, KeyCode: keyCode, Mods: mods}); err != nil {
+func (c *Client) SendKey(name string, keyCode libghostty.KeyCode, mods libghostty.Modifier) error {
+	if err := c.conn.WriteMessage(&protocol.SendKey{Name: name, KeyCode: uint32(keyCode), Mods: uint32(mods)}); err != nil {
 		return fmt.Errorf("send key: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()

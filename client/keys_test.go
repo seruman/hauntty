@@ -12,13 +12,13 @@ func TestParseKeyNotation(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		code  uint32
-		mods  uint32
+		code  libghostty.KeyCode
+		mods  libghostty.Modifier
 	}{
-		{"single letter", "a", uint32('a'), 0},
-		{"uppercase letter", "A", uint32('a'), 0},
-		{"digit", "1", uint32('1'), 0},
-		{"space", "space", uint32(' '), 0},
+		{"single letter", "a", libghostty.KeyCode('a'), 0},
+		{"uppercase letter", "A", libghostty.KeyCode('a'), 0},
+		{"digit", "1", libghostty.KeyCode('1'), 0},
+		{"space", "space", libghostty.KeyCode(' '), 0},
 		{"enter", "enter", libghostty.KeyEnter, 0},
 		{"return alias", "return", libghostty.KeyEnter, 0},
 		{"escape", "escape", libghostty.KeyEscape, 0},
@@ -40,18 +40,18 @@ func TestParseKeyNotation(t *testing.T) {
 		{"del alias", "del", libghostty.KeyDelete, 0},
 		{"f1", "f1", libghostty.KeyF1, 0},
 		{"f12", "f12", libghostty.KeyF12, 0},
-		{"ctrl+c", "ctrl+c", uint32('c'), libghostty.ModCtrl},
-		{"control+c", "control+c", uint32('c'), libghostty.ModCtrl},
+		{"ctrl+c", "ctrl+c", libghostty.KeyCode('c'), libghostty.ModCtrl},
+		{"control+c", "control+c", libghostty.KeyCode('c'), libghostty.ModCtrl},
 		{"shift+up", "shift+up", libghostty.KeyUp, libghostty.ModShift},
-		{"alt+a", "alt+a", uint32('a'), libghostty.ModAlt},
-		{"opt+a", "opt+a", uint32('a'), libghostty.ModAlt},
-		{"option+a", "option+a", uint32('a'), libghostty.ModAlt},
-		{"super+a", "super+a", uint32('a'), libghostty.ModSuper},
-		{"cmd+a", "cmd+a", uint32('a'), libghostty.ModSuper},
-		{"command+a", "command+a", uint32('a'), libghostty.ModSuper},
+		{"alt+a", "alt+a", libghostty.KeyCode('a'), libghostty.ModAlt},
+		{"opt+a", "opt+a", libghostty.KeyCode('a'), libghostty.ModAlt},
+		{"option+a", "option+a", libghostty.KeyCode('a'), libghostty.ModAlt},
+		{"super+a", "super+a", libghostty.KeyCode('a'), libghostty.ModSuper},
+		{"cmd+a", "cmd+a", libghostty.KeyCode('a'), libghostty.ModSuper},
+		{"command+a", "command+a", libghostty.KeyCode('a'), libghostty.ModSuper},
 		{"ctrl+shift+up", "ctrl+shift+up", libghostty.KeyUp, libghostty.ModCtrl | libghostty.ModShift},
 		{"case insensitive", "Ctrl+Enter", libghostty.KeyEnter, libghostty.ModCtrl},
-		{"whitespace trimmed", "  ctrl+c  ", uint32('c'), libghostty.ModCtrl},
+		{"whitespace trimmed", "  ctrl+c  ", libghostty.KeyCode('c'), libghostty.ModCtrl},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

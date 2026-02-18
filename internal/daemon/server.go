@@ -429,7 +429,7 @@ func (s *Server) handleSendKey(conn *protocol.Conn, msg *protocol.SendKey) {
 		return
 	}
 
-	data, err := sess.term.EncodeKey(s.ctx, msg.KeyCode, msg.Mods)
+	data, err := sess.term.EncodeKey(s.ctx, libghostty.KeyCode(msg.KeyCode), libghostty.Modifier(msg.Mods))
 	if err != nil {
 		if werr := conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
@@ -464,8 +464,8 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	}
 
 	// Map protocol format to WASM format, preserving flag bits.
-	flags := uint32(msg.Format) & ^libghostty.DumpFormatMask
-	var wasmFmt uint32
+	flags := libghostty.DumpFormat(msg.Format) & ^libghostty.DumpFormatMask
+	var wasmFmt libghostty.DumpFormat
 	switch msg.Format & protocol.DumpFormatMask {
 	case protocol.DumpVT:
 		wasmFmt = libghostty.DumpVTSafe

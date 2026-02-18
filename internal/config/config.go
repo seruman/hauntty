@@ -41,6 +41,7 @@ func Default() *Config {
 			StatePersistenceInterval: 30,
 		},
 		Client: ClientConfig{
+			// TODO: ctrl+; requires kitty keyboard protocol, consider ctrl+]
 			DetachKeybind: "ctrl+;",
 		},
 		Session: SessionConfig{

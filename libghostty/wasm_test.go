@@ -205,13 +205,13 @@ func TestEncodeKey(t *testing.T) {
 	defer term.Close(ctx)
 
 	t.Run("plain letter", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, uint32('a'), 0)
+		data, err := term.EncodeKey(ctx, libghostty.KeyCode('a'), 0)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("a"))
 	})
 
 	t.Run("ctrl+c", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, uint32('c'), libghostty.ModCtrl)
+		data, err := term.EncodeKey(ctx, libghostty.KeyCode('c'), libghostty.ModCtrl)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x03"))
 	})
@@ -241,7 +241,7 @@ func TestEncodeKey(t *testing.T) {
 	})
 
 	t.Run("alt+a", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, uint32('a'), libghostty.ModAlt)
+		data, err := term.EncodeKey(ctx, libghostty.KeyCode('a'), libghostty.ModAlt)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1ba"))
 	})
@@ -267,7 +267,7 @@ func TestEncodeKeyKittyMode(t *testing.T) {
 	assert.NilError(t, err)
 
 	t.Run("ctrl+c in kitty mode", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, uint32('c'), libghostty.ModCtrl)
+		data, err := term.EncodeKey(ctx, libghostty.KeyCode('c'), libghostty.ModCtrl)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1b[99;5u"))
 	})
