@@ -269,6 +269,10 @@ func (s *Session) readLoop(ctx context.Context) {
 }
 
 func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string) (*attachedClient, error) {
+	// Resize before dumping so the screen dump reflects the dimensions
+	// that will be in effect once this client is added.
+	s.resizeForPendingClient(ctx, cols, rows, xpixel, ypixel)
+
 	dump, err := s.term.DumpScreen(ctx, libghostty.DumpVTFull)
 	if err != nil {
 		return nil, err
@@ -435,44 +439,77 @@ func (s *Session) isRunning() bool {
 	}
 }
 
+type clientDims struct {
+	cols, rows, xpixel, ypixel uint16
+}
+
+func applyResizePolicy(policy string, dims []clientDims) (cols, rows, xpixel, ypixel uint16) {
+	switch policy {
+	case "largest":
+		for _, d := range dims {
+			cols = max(cols, d.cols)
+			rows = max(rows, d.rows)
+			xpixel = max(xpixel, d.xpixel)
+			ypixel = max(ypixel, d.ypixel)
+		}
+	case "last":
+		d := dims[len(dims)-1]
+		cols, rows = d.cols, d.rows
+		xpixel, ypixel = d.xpixel, d.ypixel
+	case "first":
+		d := dims[0]
+		cols, rows = d.cols, d.rows
+		xpixel, ypixel = d.xpixel, d.ypixel
+	default: // "smallest"
+		cols, rows = math.MaxUint16, math.MaxUint16
+		xpixel, ypixel = math.MaxUint16, math.MaxUint16
+		for _, d := range dims {
+			cols = min(cols, d.cols)
+			rows = min(rows, d.rows)
+			xpixel = min(xpixel, d.xpixel)
+			ypixel = min(ypixel, d.ypixel)
+		}
+	}
+	return
+}
+
+func (s *Session) collectClientDims() []clientDims {
+	dims := make([]clientDims, len(s.clients))
+	for i, c := range s.clients {
+		dims[i] = clientDims{c.cols, c.rows, c.xpixel, c.ypixel}
+	}
+	return dims
+}
+
 func (s *Session) arbitrateResize() {
 	s.clientMu.Lock()
 	if len(s.clients) == 0 {
 		s.clientMu.Unlock()
 		return
 	}
-	var cols, rows, xpixel, ypixel uint16
-	switch s.resizePolicy {
-	case "largest":
-		for _, c := range s.clients {
-			cols = max(cols, c.cols)
-			rows = max(rows, c.rows)
-			xpixel = max(xpixel, c.xpixel)
-			ypixel = max(ypixel, c.ypixel)
-		}
-	case "last":
-		last := s.clients[len(s.clients)-1]
-		cols, rows = last.cols, last.rows
-		xpixel, ypixel = last.xpixel, last.ypixel
-	case "first":
-		first := s.clients[0]
-		cols, rows = first.cols, first.rows
-		xpixel, ypixel = first.xpixel, first.ypixel
-	default: // "smallest"
-		cols, rows = math.MaxUint16, math.MaxUint16
-		xpixel, ypixel = math.MaxUint16, math.MaxUint16
-		for _, c := range s.clients {
-			cols = min(cols, c.cols)
-			rows = min(rows, c.rows)
-			xpixel = min(xpixel, c.xpixel)
-			ypixel = min(ypixel, c.ypixel)
-		}
-	}
+	dims := s.collectClientDims()
 	s.clientMu.Unlock()
 
+	cols, rows, xpixel, ypixel := applyResizePolicy(s.resizePolicy, dims)
 	curCols, curRows := s.size()
 	if cols != curCols || rows != curRows {
 		s.resize(context.Background(), cols, rows, xpixel, ypixel)
+	}
+}
+
+// resizeForPendingClient computes and applies the resize that would
+// result from adding a client with the given dimensions, without
+// actually adding it to the client list. This is used before dumping
+// the screen on attach so the dump reflects the correct size.
+func (s *Session) resizeForPendingClient(ctx context.Context, cols, rows, xpixel, ypixel uint16) {
+	s.clientMu.Lock()
+	dims := append(s.collectClientDims(), clientDims{cols, rows, xpixel, ypixel})
+	s.clientMu.Unlock()
+
+	targetCols, targetRows, targetXpixel, targetYpixel := applyResizePolicy(s.resizePolicy, dims)
+	curCols, curRows := s.size()
+	if targetCols != curCols || targetRows != curRows {
+		s.resize(ctx, targetCols, targetRows, targetXpixel, targetYpixel)
 	}
 }
 
