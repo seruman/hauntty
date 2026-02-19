@@ -94,7 +94,7 @@ func TestAltScreenDetachReattachCycles(t *testing.T) {
 	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})
 	daemon.WaitFor("daemon listening")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
 		sh.WaitFor("$")
 		name := fmt.Sprintf("alt-cycle-%d", i)
@@ -264,7 +264,7 @@ func TestDetachHostModeLeakCycles(t *testing.T) {
 	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})
 	daemon.WaitFor("daemon listening")
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
 		sh.WaitFor("$")
 		name := fmt.Sprintf("leak-cycle-%d", i)
