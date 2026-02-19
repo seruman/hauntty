@@ -118,11 +118,10 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 	}
 
 	if ok.Created {
-		fmt.Printf("created session %q (pid %d)\n", ok.SessionName, ok.PID)
-	} else {
-		fmt.Printf("session %q already exists (pid %d)\n", ok.SessionName, ok.PID)
+		fmt.Printf("created session %q\n", ok.SessionName)
+		return nil
 	}
-	return nil
+	return fmt.Errorf("session %q already exists", ok.SessionName)
 }
 
 type ListCmd struct {

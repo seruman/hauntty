@@ -153,3 +153,67 @@ func TestDaemonAutoExit(t *testing.T) {
 		t.Fatal("daemon did not auto-exit")
 	}
 }
+
+func TestNewCreatesSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.Daemon.AutoExit = true
+	e := setup(t, cfg)
+
+	created := e.run("new", "new-session")
+	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-session\"\n"})
+
+	sendText := e.run("send", "new-session", "echo created-via-new")
+	sendText.Assert(t, icmd.Success)
+	sendKey := e.run("send", "new-session", "--key", "enter")
+	sendKey.Assert(t, icmd.Success)
+
+	wait := e.run("wait", "new-session", "created-via-new", "-t", "5000")
+	wait.Assert(t, icmd.Success)
+
+	kill := e.run("kill", "new-session")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"new-session\"\n"})
+}
+
+func TestNewWithCommand(t *testing.T) {
+	cfg := config.Default()
+	cfg.Daemon.AutoExit = true
+	e := setup(t, cfg)
+
+	created := e.run("new", "new-command", "--", "/bin/sh", "-c", "printf 'new-command-ok\\n'; sleep 30")
+	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-command\"\n"})
+
+	wait := e.run("wait", "new-command", "new-command-ok", "-t", "5000")
+	wait.Assert(t, icmd.Success)
+
+	kill := e.run("kill", "new-command")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"new-command\"\n"})
+}
+
+func TestNewExistingSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.Daemon.AutoExit = true
+	e := setup(t, cfg)
+
+	first := e.run("new", "new-existing")
+	first.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-existing\"\n"})
+
+	sendOne := e.run("send", "new-existing", "echo first-pass")
+	sendOne.Assert(t, icmd.Success)
+	enterOne := e.run("send", "new-existing", "--key", "enter")
+	enterOne.Assert(t, icmd.Success)
+	waitOne := e.run("wait", "new-existing", "first-pass", "-t", "5000")
+	waitOne.Assert(t, icmd.Success)
+
+	second := e.run("new", "new-existing")
+	second.Assert(t, icmd.Expected{ExitCode: 1, Err: "ht: error: session \"new-existing\" already exists\n"})
+
+	sendTwo := e.run("send", "new-existing", "echo second-pass")
+	sendTwo.Assert(t, icmd.Success)
+	enterTwo := e.run("send", "new-existing", "--key", "enter")
+	enterTwo.Assert(t, icmd.Success)
+	waitTwo := e.run("wait", "new-existing", "second-pass", "-t", "5000")
+	waitTwo.Assert(t, icmd.Success)
+
+	kill := e.run("kill", "new-existing")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"new-existing\"\n"})
+}
