@@ -17,19 +17,20 @@ The client (`ht`) talks to the daemon over a Unix socket.
 ## Usage
 
 ```bash
-ht attach work           # attach to session (creates if needed)
-ht attach build -- make  # run a command in a session
-ht list                  # list sessions
-ht kill work             # kill a session
+ht attach work          # attach to session (creates if needed)
+ht new work npm run dev # create/start without attaching
+ht list                 # list sessions
+ht kill work            # kill a session
 # detach with ctrl+;
 ```
 
-Daemon starts on first attach. Sessions persist until killed or the shell exits.
+Daemon starts on first attach/new. Sessions persist until killed or the shell exits.
 
 ## Commands
 
 ```
 attach (a)    Attach to a session, create if needed
+new           Create/start a session without attaching
 list (ls)     List sessions
 kill          Kill a session
 send          Send input to a session without attaching

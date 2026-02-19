@@ -21,12 +21,14 @@ import (
 	"code.selman.me/hauntty/internal/protocol"
 	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
+	"golang.org/x/term"
 )
 
 type CLI struct {
 	Version    kong.VersionFlag `help:"Print version."`
 	Socket     string           `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
 	Attach     AttachCmd        `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
+	New        NewCmd           `cmd:"" help:"Create/start a session without attaching."`
 	List       ListCmd          `cmd:"" aliases:"ls" help:"List sessions."`
 	Kill       KillCmd          `cmd:"" help:"Kill a session."`
 	Send       SendCmd          `cmd:"" help:"Send input to a session."`
@@ -41,6 +43,11 @@ type CLI struct {
 	Completion CompletionCmd    `cmd:"" help:"Generate shell completion script."`
 }
 
+const (
+	headlessCols = 120
+	headlessRows = 30
+)
+
 type AttachCmd struct {
 	Name    string   `arg:"" optional:"" help:"Session name."`
 	Command []string `arg:"" optional:"" help:"Command to run."`
@@ -49,6 +56,13 @@ type AttachCmd struct {
 func (cmd *AttachCmd) Run(cfg *config.Config) error {
 	if s := os.Getenv("HAUNTTY_SESSION"); s != "" {
 		return fmt.Errorf("already inside session %q, nested sessions are not supported", s)
+	}
+
+	if !isInteractiveAttachTTY() {
+		if cmd.Name == "" {
+			return fmt.Errorf("interactive attach requires a TTY; use `ht new`")
+		}
+		return fmt.Errorf("interactive attach requires a TTY; use `ht new %s`", cmd.Name)
 	}
 
 	dk, err := client.ParseDetachKey(cfg.Client.DetachKeybind)
@@ -65,12 +79,50 @@ func (cmd *AttachCmd) Run(cfg *config.Config) error {
 	}
 	defer c.Close()
 
-	command := cmd.Command
-	if len(command) == 0 && cfg.Session.DefaultCommand != "" {
-		command = strings.Fields(cfg.Session.DefaultCommand)
-	}
+	command := resolveCommand(cmd.Command, cfg)
 
 	return c.RunAttach(cmd.Name, command, dk, cfg.Session.ForwardEnv)
+}
+
+type NewCmd struct {
+	Name    string   `arg:"" optional:"" help:"Session name."`
+	Command []string `arg:"" optional:"" help:"Command to run."`
+}
+
+func (cmd *NewCmd) Run(cfg *config.Config) error {
+	if err := ensureDaemon(cfg.Daemon.SocketPath); err != nil {
+		return err
+	}
+	c, err := client.Connect(cfg.Daemon.SocketPath)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get cwd: %w", err)
+	}
+
+	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), collectForwardedEnv(cfg.Session.ForwardEnv), 10000, cwd)
+	if err != nil {
+		return err
+	}
+
+	msg, err := c.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("read initial state: %w", err)
+	}
+	if _, isState := msg.(*protocol.State); !isState {
+		return fmt.Errorf("unexpected initial response type: 0x%02x", msg.Type())
+	}
+
+	if ok.Created {
+		fmt.Printf("created session %q (pid %d)\n", ok.SessionName, ok.PID)
+	} else {
+		fmt.Printf("session %q already exists (pid %d)\n", ok.SessionName, ok.PID)
+	}
+	return nil
 }
 
 type ListCmd struct {
@@ -290,6 +342,36 @@ func formatUptime(seconds uint32) string {
 		return fmt.Sprintf("%dm %ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
+}
+
+func resolveCommand(command []string, cfg *config.Config) []string {
+	if len(command) > 0 {
+		return command
+	}
+	if cfg.Session.DefaultCommand == "" {
+		return nil
+	}
+	return strings.Fields(cfg.Session.DefaultCommand)
+}
+
+func collectForwardedEnv(extra []string) []string {
+	always := []string{"TERM", "SHELL"}
+	env := make([]string, 0, len(always)+len(extra))
+	for _, key := range always {
+		if val, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+val)
+		}
+	}
+	for _, key := range extra {
+		if val, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+val)
+		}
+	}
+	return env
+}
+
+func isInteractiveAttachTTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 type WaitCmd struct {

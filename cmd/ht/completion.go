@@ -33,7 +33,7 @@ const completionBash = `_ht_completions() {
 		esac
 	done
 	if [[ -z "$subcmd" ]]; then
-		COMPREPLY=($(compgen -W "attach list kill send dump detach wait status prune init config daemon" -- "$cur"))
+		COMPREPLY=($(compgen -W "attach new list kill send dump detach wait status prune init config daemon" -- "$cur"))
 		return
 	fi
 	local argpos=0
@@ -70,6 +70,7 @@ _ht() {
 	local -a commands=(
 		'attach:Attach to a session'
 		'a:Attach to a session'
+		'new:Create session without attaching'
 		'list:List sessions'
 		'ls:List sessions'
 		'kill:Kill a session'
@@ -114,6 +115,7 @@ end
 complete -c ht -f
 complete -c ht -n __fish_use_subcommand -a attach -d 'Attach to a session'
 complete -c ht -n __fish_use_subcommand -a a -d 'Attach to a session'
+complete -c ht -n __fish_use_subcommand -a new -d 'Create session without attaching'
 complete -c ht -n __fish_use_subcommand -a list -d 'List sessions'
 complete -c ht -n __fish_use_subcommand -a ls -d 'List sessions'
 complete -c ht -n __fish_use_subcommand -a kill -d 'Kill a session'
