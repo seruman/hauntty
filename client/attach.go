@@ -17,11 +17,14 @@ import (
 )
 
 func isConnClosed(err error) bool {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		return opErr.Err.Error() == "use of closed network connection"
+	if err == nil {
+		return false
 	}
-	return false
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && errors.Is(opErr.Err, net.ErrClosed)
 }
 
 var alwaysForwardEnv = []string{
