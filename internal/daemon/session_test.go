@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"math"
+	"os/exec"
+	"syscall"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -116,4 +118,28 @@ func TestApplyResizePolicySmallestStartsAtMaxUint16(t *testing.T) {
 	assert.Equal(t, rows, uint16(math.MaxUint16))
 	assert.Equal(t, xpixel, uint16(math.MaxUint16))
 	assert.Equal(t, ypixel, uint16(math.MaxUint16))
+}
+
+func TestExitCodeFromWaitStatusExited(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "exit 17")
+	err := cmd.Run()
+	assert.Assert(t, err != nil)
+
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	assert.Assert(t, ok)
+
+	code := exitCodeFromWaitStatus(ws)
+	assert.Equal(t, code, int32(17))
+}
+
+func TestExitCodeFromWaitStatusSignaled(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "kill -TERM $$")
+	err := cmd.Run()
+	assert.Assert(t, err != nil)
+
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	assert.Assert(t, ok)
+
+	code := exitCodeFromWaitStatus(ws)
+	assert.Equal(t, code, int32(128+syscall.SIGTERM))
 }

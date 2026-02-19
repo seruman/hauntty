@@ -253,7 +253,7 @@ func (s *Session) readLoop(ctx context.Context) {
 
 	s.cmd.Wait()
 	if ws, ok := s.cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
-		s.exitCode = int32(ws.ExitStatus())
+		s.exitCode = exitCodeFromWaitStatus(ws)
 	}
 	close(s.done)
 
@@ -423,6 +423,16 @@ func (s *Session) broadcastClientsChanged(count uint16) {
 	for _, ac := range clients {
 		_ = ac.conn.WriteMessage(msg)
 	}
+}
+
+func exitCodeFromWaitStatus(ws syscall.WaitStatus) int32 {
+	if ws.Exited() {
+		return int32(ws.ExitStatus())
+	}
+	if ws.Signaled() {
+		return int32(128 + ws.Signal())
+	}
+	return 1
 }
 
 func (s *Session) kill() {
