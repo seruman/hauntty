@@ -20,10 +20,10 @@ func TestSendTextAndKey(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 	sh.Type("$HT_BIN attach send-session\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
 
@@ -48,10 +48,10 @@ func TestWaitSessionOutput(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 	sh.Type("$HT_BIN attach wait-session\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 	sh.Type("echo ready-for-wait\n")
 	sh.WaitFor("ready-for-wait")
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
@@ -73,10 +73,10 @@ func TestWaitRegex(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 	sh.Type("$HT_BIN attach regex-session\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 	sh.Type("echo value-42\n")
 	sh.WaitFor("value-42")
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
@@ -99,11 +99,11 @@ func TestDumpPlain(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN attach dump-session\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 
 	sh.Type("printf 'alpha\\nbeta\\n'\n")
 	sh.WaitFor("alpha")
@@ -111,7 +111,7 @@ func TestDumpPlain(t *testing.T) {
 
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	result := e.run("dump", "dump-session", "--format", "plain")
 	result.Assert(t, icmd.Success)
@@ -127,10 +127,10 @@ func TestDumpFormats(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 	sh.Type("$HT_BIN attach dump-formats\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 	sh.Type("printf 'fmt-line-1\\nfmt-line-2\\n'\n")
 	sh.WaitFor("fmt-line-1")
 	sh.WaitFor("fmt-line-2")

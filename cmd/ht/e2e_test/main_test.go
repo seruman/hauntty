@@ -3,8 +3,10 @@ package e2e_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"gotest.tools/v3/fs"
@@ -14,7 +16,10 @@ import (
 	"code.selman.me/hauntty/internal/termtest"
 )
 
-var htBin string
+var (
+	htBin        string
+	hostPromptRE = regexp.MustCompile(`\$ ?$`)
+)
 
 type testEnv struct {
 	t       *testing.T
@@ -83,4 +88,14 @@ func (e *testEnv) term(cmd []string, opts ...termtest.Option) *termtest.Term {
 func (e *testEnv) run(args ...string) *icmd.Result {
 	cmd := icmd.Command(htBin, args...)
 	return icmd.RunCmd(cmd, icmd.WithEnv(append(os.Environ(), e.env()...)...))
+}
+
+func (e *testEnv) waitHostPrompt(sh *termtest.Term) {
+	e.t.Helper()
+	sh.WaitPromptMatch(hostPromptRE.MatchString, termtest.WaitTimeout(8*time.Second))
+}
+
+func (e *testEnv) waitAttachedPrompt(sh *termtest.Term) {
+	e.t.Helper()
+	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
 }

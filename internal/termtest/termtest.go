@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -292,6 +293,197 @@ func (tm *Term) WaitFor(substr string, opts ...WaitOption) {
 			}
 		}
 	}
+}
+
+func (tm *Term) RowContains(row int, substr string) bool {
+	tm.t.Helper()
+	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+	if err != nil {
+		return false
+	}
+	return rowContainsDump(dump, row, substr)
+}
+
+func (tm *Term) CursorRowContains(substr string) bool {
+	tm.t.Helper()
+	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+	if err != nil {
+		return false
+	}
+	return rowContainsDump(dump, int(dump.CursorRow), substr)
+}
+
+func (tm *Term) WaitRowContains(row int, substr string, opts ...WaitOption) {
+	tm.t.Helper()
+
+	wo := waitOptions{
+		timeout:  tm.opts.timeout,
+		interval: 50 * time.Millisecond,
+	}
+	for _, fn := range opts {
+		fn(&wo)
+	}
+
+	deadline := time.After(wo.timeout)
+	ticker := time.NewTicker(wo.interval)
+	defer ticker.Stop()
+
+	var last string
+	for {
+		select {
+		case <-deadline:
+			tm.t.Fatalf("termtest: WaitRowContains(row=%d, %q) timed out after %v\nlast screen:\n%s", row, substr, wo.timeout, last)
+		case <-ticker.C:
+			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			if err != nil {
+				continue
+			}
+			last = string(dump.VT)
+			if rowContainsDump(dump, row, substr) {
+				return
+			}
+		}
+	}
+}
+
+func (tm *Term) WaitCursorRowContains(substr string, opts ...WaitOption) {
+	tm.t.Helper()
+	wo := waitOptions{timeout: tm.opts.timeout, interval: 50 * time.Millisecond}
+	for _, fn := range opts {
+		fn(&wo)
+	}
+
+	deadline := time.After(wo.timeout)
+	ticker := time.NewTicker(wo.interval)
+	defer ticker.Stop()
+
+	var last string
+	for {
+		select {
+		case <-deadline:
+			tm.t.Fatalf("termtest: WaitCursorRowContains(%q) timed out after %v\nlast screen:\n%s", substr, wo.timeout, last)
+		case <-ticker.C:
+			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			if err != nil {
+				continue
+			}
+			last = string(dump.VT)
+			if rowContainsDump(dump, int(dump.CursorRow), substr) {
+				return
+			}
+		}
+	}
+}
+
+func (tm *Term) PromptVisible() bool {
+	tm.t.Helper()
+	promptRE := regexp.MustCompile(`[#$>] ?$`)
+	return tm.PromptVisibleMatch(promptRE.MatchString)
+}
+
+func (tm *Term) PromptVisibleMatch(match func(string) bool) bool {
+	tm.t.Helper()
+	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+	if err != nil {
+		return false
+	}
+	row := int(dump.CursorRow)
+	return promptOnRowMatch(dump, row, match) || promptOnRowMatch(dump, row-1, match)
+}
+
+func (tm *Term) WaitPrompt(opts ...WaitOption) {
+	tm.t.Helper()
+	promptRE := regexp.MustCompile(`[#$>] ?$`)
+	tm.WaitPromptMatch(promptRE.MatchString, opts...)
+}
+
+func (tm *Term) WaitPromptMatch(match func(string) bool, opts ...WaitOption) {
+	tm.t.Helper()
+	wo := waitOptions{timeout: tm.opts.timeout, interval: 50 * time.Millisecond}
+	for _, fn := range opts {
+		fn(&wo)
+	}
+
+	deadline := time.After(wo.timeout)
+	ticker := time.NewTicker(wo.interval)
+	defer ticker.Stop()
+
+	var last string
+	for {
+		select {
+		case <-deadline:
+			tm.t.Fatalf("termtest: WaitPromptMatch timed out after %v\nlast screen:\n%s", wo.timeout, last)
+		case <-ticker.C:
+			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			if err != nil {
+				continue
+			}
+			last = string(dump.VT)
+			row := int(dump.CursorRow)
+			if promptOnRowMatch(dump, row, match) || promptOnRowMatch(dump, row-1, match) {
+				return
+			}
+		}
+	}
+}
+
+func (tm *Term) WaitStable(stableFor time.Duration, opts ...WaitOption) {
+	tm.t.Helper()
+	wo := waitOptions{timeout: tm.opts.timeout, interval: 50 * time.Millisecond}
+	for _, fn := range opts {
+		fn(&wo)
+	}
+
+	deadline := time.After(wo.timeout)
+	ticker := time.NewTicker(wo.interval)
+	defer ticker.Stop()
+
+	var last string
+	var sameSince time.Time
+	for {
+		select {
+		case <-deadline:
+			tm.t.Fatalf("termtest: WaitStable(%v) timed out after %v\nlast screen:\n%s", stableFor, wo.timeout, last)
+		case <-ticker.C:
+			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			if err != nil {
+				continue
+			}
+			cur := string(dump.VT)
+			if cur != last {
+				last = cur
+				sameSince = time.Now()
+				continue
+			}
+			if !sameSince.IsZero() && time.Since(sameSince) >= stableFor {
+				return
+			}
+		}
+	}
+}
+
+func promptOnRowMatch(dump *libghostty.ScreenDump, row int, match func(string) bool) bool {
+	line, ok := rowLine(dump, row)
+	if !ok {
+		return false
+	}
+	return match(strings.TrimRight(line, "\r"))
+}
+
+func rowContainsDump(dump *libghostty.ScreenDump, row int, substr string) bool {
+	line, ok := rowLine(dump, row)
+	if !ok {
+		return false
+	}
+	return strings.Contains(line, substr)
+}
+
+func rowLine(dump *libghostty.ScreenDump, row int) (string, bool) {
+	lines := strings.Split(string(dump.VT), "\n")
+	if row < 0 || row >= len(lines) {
+		return "", false
+	}
+	return lines[row], true
 }
 
 func (tm *Term) Done() <-chan struct{} {

@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -18,18 +19,18 @@ func TestAttachStartsDaemonWhenNeeded(t *testing.T) {
 	e := setup(t, cfg)
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN attach auto-start\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 
 	sh.Type("echo daemon-started\n")
 	sh.WaitFor("daemon-started")
 
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	kill := e.run("kill", "auto-start")
 	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"auto-start\"\n"})
@@ -44,18 +45,18 @@ func TestAttachInteractDetachList(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN attach test-session\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 
 	sh.Type("echo hello-from-hauntty\n")
 	sh.WaitFor("hello-from-hauntty")
 
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN list\n")
 	sh.WaitFor("test-session")
@@ -70,26 +71,36 @@ func TestReattachSessionContinuity(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN attach continuity\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 	sh.Type("export PS1='IN> '\n")
 	sh.WaitFor("IN>")
 
 	sh.Type("echo marker-one\n")
 	sh.WaitFor("marker-one")
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
-	sh.WaitFor("$")
+	detachOne := icmd.RunCmd(
+		icmd.Command(htBin, "detach"),
+		icmd.WithEnv(append(os.Environ(), append(e.env(), "HAUNTTY_SESSION=continuity")...)...),
+	)
+	detachOne.Assert(t, icmd.Success)
+	sh.WaitFor("detached")
+	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN attach continuity\n")
 	sh.WaitFor("IN>")
 	sh.WaitFor("marker-one")
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
-	sh.WaitFor("$")
+	detachTwo := icmd.RunCmd(
+		icmd.Command(htBin, "detach"),
+		icmd.WithEnv(append(os.Environ(), append(e.env(), "HAUNTTY_SESSION=continuity")...)...),
+	)
+	detachTwo.Assert(t, icmd.Success)
+	sh.WaitFor("detached")
+	e.waitHostPrompt(sh)
 }
 
 func TestKillRunningSession(t *testing.T) {
@@ -101,11 +112,11 @@ func TestKillRunningSession(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN attach kill-me\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
 
@@ -125,10 +136,9 @@ func TestAttachWithCommand(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 	sh.Type("$HT_BIN attach oneshot -- /bin/sh -c \"printf 'oneshot-ok\\n'\"\n")
 	sh.WaitFor("oneshot-ok")
-	sh.WaitFor("$")
 
 	listAll := e.run("list", "-a")
 	listAll.Assert(t, icmd.Expected{ExitCode: 0})
@@ -143,9 +153,9 @@ func TestDaemonAutoExit(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 	sh.Type("$HT_BIN attach auto-exit -- /bin/sh -c \"exit 0\"\n")
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 
 	select {
 	case <-daemon.Done():

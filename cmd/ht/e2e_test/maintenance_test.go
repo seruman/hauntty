@@ -70,11 +70,11 @@ func TestDetachKeybind(t *testing.T) {
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 	sh.Type("$HT_BIN attach keybind-session\n")
 	sh.WaitFor("created session")
-	sh.WaitFor("$")
+	e.waitAttachedPrompt(sh)
 	sh.Key(libghostty.KeyCode('\\'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
-	sh.WaitFor("$")
+	e.waitHostPrompt(sh)
 }
