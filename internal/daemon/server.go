@@ -198,7 +198,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 			}
 		case *protocol.Input:
 			if attached != nil {
-				attached.sendInput(m.Data)
+				attached.sendInputFrom(ac, m.Data)
 			}
 		case *protocol.Resize:
 			if ac != nil {
@@ -214,7 +214,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 				target := s.sessions[m.Name]
 				s.mu.RUnlock()
 				if target != nil {
-					target.disconnectAllClients()
+					target.disconnectActiveClient()
 				}
 			} else if attached != nil {
 				attached.detachClient(ac)

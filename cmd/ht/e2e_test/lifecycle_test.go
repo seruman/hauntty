@@ -103,6 +103,38 @@ func TestReattachSessionContinuity(t *testing.T) {
 	e.waitHostPrompt(sh)
 }
 
+func TestDetachInsideSessionDetachesSingleClient(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})
+	daemon.WaitFor("daemon listening")
+
+	sh1 := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh1)
+	sh1.Type("$HT_BIN attach shared-detach\n")
+	sh1.WaitFor("created session")
+	e.waitAttachedPrompt(sh1)
+
+	sh2 := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh2)
+	sh2.Type("$HT_BIN attach shared-detach\n")
+	sh2.WaitFor("attached to session")
+	e.waitAttachedPrompt(sh2)
+
+	sh1.Type("$HT_BIN detach\n")
+	sh1.WaitFor("detached")
+	e.waitHostPrompt(sh1)
+
+	sh2.Type("echo still-attached\n")
+	sh2.WaitFor("still-attached")
+
+	sh2.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh2.WaitFor("detached")
+	e.waitHostPrompt(sh2)
+}
+
 func TestKillRunningSession(t *testing.T) {
 	cfg := config.Default()
 	cfg.Client.DetachKeybind = "ctrl+]"

@@ -55,6 +55,7 @@ type Session struct {
 	cmd          *exec.Cmd
 	term         *libghostty.Terminal
 	clients      []*attachedClient
+	activeClient *attachedClient
 	clientMu     sync.Mutex
 	feedCh       chan *[]byte
 	done         chan struct{}
@@ -308,8 +309,27 @@ func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn fun
 
 // detachClient removes a specific client without closing its net.Conn.
 func (s *Session) detachClient(ac *attachedClient) {
-	s.removeClient(ac)
+	if !s.removeClient(ac) {
+		return
+	}
 	s.arbitrateResize()
+}
+
+func (s *Session) disconnectActiveClient() {
+	s.clientMu.Lock()
+	ac := s.activeClient
+	if ac == nil && len(s.clients) == 1 {
+		ac = s.clients[0]
+	}
+	s.clientMu.Unlock()
+	if ac == nil {
+		return
+	}
+	if !s.removeClient(ac) {
+		return
+	}
+	s.arbitrateResize()
+	_ = ac.close()
 }
 
 // disconnectAllClients removes all clients and closes their connections.
@@ -317,6 +337,7 @@ func (s *Session) disconnectAllClients() {
 	s.clientMu.Lock()
 	clients := s.clients
 	s.clients = nil
+	s.activeClient = nil
 	s.clientMu.Unlock()
 	for _, ac := range clients {
 		close(ac.outCh)
@@ -333,7 +354,7 @@ func (s *Session) addClient(ac *attachedClient) {
 	s.broadcastClientsChanged(count)
 }
 
-func (s *Session) removeClient(ac *attachedClient) {
+func (s *Session) removeClient(ac *attachedClient) bool {
 	s.clientMu.Lock()
 	found := false
 	for i, c := range s.clients {
@@ -343,14 +364,18 @@ func (s *Session) removeClient(ac *attachedClient) {
 			break
 		}
 	}
+	if s.activeClient == ac {
+		s.activeClient = nil
+	}
 	count := uint16(len(s.clients))
 	s.clientMu.Unlock()
 	if !found {
-		return
+		return false
 	}
 	close(ac.outCh)
 	<-ac.done
 	s.broadcastClientsChanged(count)
+	return true
 }
 
 // broadcastOutput sends output data to all clients' outCh channels.
@@ -370,6 +395,9 @@ func (s *Session) broadcastOutput(data []byte) {
 				s.clients = append(s.clients[:i], s.clients[i+1:]...)
 				break
 			}
+		}
+		if s.activeClient == ac {
+			s.activeClient = nil
 		}
 		slog.Debug("evicting slow client", "session", s.Name)
 		close(ac.outCh)
@@ -401,6 +429,13 @@ func (s *Session) kill() {
 func (s *Session) sendInput(data []byte) error {
 	_, err := s.ptmx.Write(data)
 	return err
+}
+
+func (s *Session) sendInputFrom(ac *attachedClient, data []byte) error {
+	s.clientMu.Lock()
+	s.activeClient = ac
+	s.clientMu.Unlock()
+	return s.sendInput(data)
 }
 
 func (s *Session) size() (uint16, uint16) {
