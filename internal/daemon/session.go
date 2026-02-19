@@ -410,16 +410,19 @@ func (s *Session) broadcastOutput(data []byte) {
 
 func (s *Session) broadcastClientsChanged(count uint16) {
 	cols, rows := s.size()
-	s.clientMu.Lock()
 	msg := &protocol.ClientsChanged{
 		Count: count,
 		Cols:  cols,
 		Rows:  rows,
 	}
-	for _, ac := range s.clients {
-		ac.conn.WriteMessage(msg)
-	}
+
+	s.clientMu.Lock()
+	clients := append([]*attachedClient(nil), s.clients...)
 	s.clientMu.Unlock()
+
+	for _, ac := range clients {
+		_ = ac.conn.WriteMessage(msg)
+	}
 }
 
 func (s *Session) kill() {
