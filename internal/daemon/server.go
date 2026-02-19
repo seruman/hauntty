@@ -167,14 +167,9 @@ func (s *Server) handleConn(netConn net.Conn) {
 		}
 		return
 	}
-	// TODO: replace exact match with semver compatibility negotiation.
 	serverRev := hauntty.Version()
 	if clientRev != serverRev {
-		slog.Warn("rejected client: revision mismatch", "client", clientRev, "server", serverRev)
-		if err := conn.AcceptVersion(0, serverRev); err != nil {
-			slog.Debug("reject handshake", "err", err)
-		}
-		return
+		slog.Warn("client/server revision differ", "client", clientRev, "server", serverRev)
 	}
 	if err := conn.AcceptVersion(protocol.ProtocolVersion, serverRev); err != nil {
 		return
