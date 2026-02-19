@@ -146,9 +146,8 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 	defer signal.Stop(sigwinch)
 
 	var (
-		exitCode int
-		mu       sync.Mutex
-		done     = make(chan struct{})
+		mu   sync.Mutex
+		done = make(chan struct{})
 	)
 
 	go func() {
@@ -210,29 +209,27 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		}
 	}()
 
-	handleMsg := func(msg protocol.Message) bool {
+	handleMsg := func(msg protocol.Message) error {
 		switch m := msg.(type) {
 		case *protocol.Output:
 			os.Stdout.Write(m.Data)
 		case *protocol.Exited:
-			exitCode = int(m.ExitCode)
-			return true
+			return &ExitError{Code: int(m.ExitCode)}
 		case *protocol.Error:
 			term.Restore(fd, oldState)
 			fmt.Fprintf(os.Stderr, "[hauntty] error: %s\n", m.Message)
-			exitCode = 1
-			return true
+			return &ExitError{Code: 1}
 		case *protocol.ClientsChanged:
 			_ = m // informational, no action needed
 		}
-		return false
+		return nil
 	}
 
 	if firstMsg != nil {
-		if handleMsg(firstMsg) {
+		if err := handleMsg(firstMsg); err != nil {
 			close(done)
 			term.Restore(fd, oldState)
-			os.Exit(exitCode)
+			return err
 		}
 	}
 
@@ -263,10 +260,10 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			term.Restore(fd, oldState)
 			return fmt.Errorf("read message: %w", err)
 		}
-		if handleMsg(msg) {
+		if err := handleMsg(msg); err != nil {
 			close(done)
 			term.Restore(fd, oldState)
-			os.Exit(exitCode)
+			return err
 		}
 	}
 }

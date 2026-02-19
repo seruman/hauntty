@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -396,7 +397,7 @@ func (cmd *WaitCmd) Run(cfg *config.Config) error {
 
 	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
-		os.Exit(2)
+		return &commandExitError{code: 2}
 	}
 	defer c.Close()
 
@@ -404,8 +405,7 @@ func (cmd *WaitCmd) Run(cfg *config.Config) error {
 	for {
 		data, err := c.Dump(cmd.Name, protocol.DumpPlain)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(2)
+			return &commandExitError{code: 2, stderr: fmt.Sprintf("error: %v\n", err)}
 		}
 
 		content := string(data)
@@ -423,8 +423,7 @@ func (cmd *WaitCmd) Run(cfg *config.Config) error {
 		}
 
 		if time.Now().After(deadline) {
-			fmt.Fprintf(os.Stderr, "timeout waiting for %q\n", cmd.Pattern)
-			os.Exit(1)
+			return &commandExitError{code: 1, stderr: fmt.Sprintf("timeout waiting for %q\n", cmd.Pattern)}
 		}
 
 		time.Sleep(time.Duration(cmd.Interval) * time.Millisecond)
@@ -506,6 +505,34 @@ func (cmd *DaemonCmd) Run(cfg *config.Config) error {
 	return srv.Listen()
 }
 
+type exitCoder interface {
+	ExitCode() int
+}
+
+type stderrProvider interface {
+	Stderr() string
+}
+
+type commandExitError struct {
+	code   int
+	stderr string
+}
+
+func (e *commandExitError) Error() string {
+	if e.stderr != "" {
+		return strings.TrimSuffix(e.stderr, "\n")
+	}
+	return fmt.Sprintf("exit with code %d", e.code)
+}
+
+func (e *commandExitError) ExitCode() int {
+	return e.code
+}
+
+func (e *commandExitError) Stderr() string {
+	return e.stderr
+}
+
 func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli,
@@ -518,6 +545,21 @@ func main() {
 		cfg.Daemon.SocketPath = cli.Socket
 	}
 	err = ctx.Run(cfg)
+	if err == nil {
+		return
+	}
+
+	var ec exitCoder
+	if errors.As(err, &ec) {
+		var sp stderrProvider
+		if errors.As(err, &sp) {
+			if stderr := sp.Stderr(); stderr != "" {
+				fmt.Fprint(os.Stderr, stderr)
+			}
+		}
+		os.Exit(ec.ExitCode())
+	}
+
 	ctx.FatalIfErrorf(err)
 }
 
