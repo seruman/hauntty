@@ -473,10 +473,27 @@ func (cmd *ConfigCmd) Run(cfg *config.Config) error {
 }
 
 type DaemonCmd struct {
-	AutoExit bool `help:"Exit when last session dies."`
+	AutoExit bool   `help:"Exit when last session dies."`
+	Detach   bool   `short:"d" help:"Run daemon in background and exit."`
+	LogFile  string `name:"log-file" help:"Daemon log file path (detach mode only)."`
+}
+
+func (cmd *DaemonCmd) validate() error {
+	if cmd.LogFile != "" && !cmd.Detach {
+		return fmt.Errorf("--log-file requires --detach")
+	}
+	return nil
 }
 
 func (cmd *DaemonCmd) Run(cfg *config.Config) error {
+	if err := cmd.validate(); err != nil {
+		return err
+	}
+
+	if cmd.Detach {
+		return ensureDaemonDetached(cfg.Daemon.SocketPath, cmd.AutoExit, cmd.LogFile)
+	}
+
 	if cmd.AutoExit {
 		cfg.Daemon.AutoExit = true
 	}
@@ -562,6 +579,21 @@ func main() {
 }
 
 func ensureDaemon(socketPath string) error {
+	return ensureDaemonDetached(socketPath, false, "")
+}
+
+func daemonStartArgs(socketPath string, autoExit bool) []string {
+	args := []string{"daemon"}
+	if autoExit {
+		args = append(args, "--auto-exit")
+	}
+	if socketPath != "" {
+		args = append(args, "--socket", socketPath)
+	}
+	return args
+}
+
+func ensureDaemonDetached(socketPath string, autoExit bool, logPath string) error {
 	sock := cmp.Or(socketPath, config.SocketPath())
 	if client.DaemonRunning(sock) {
 		return nil
@@ -572,33 +604,37 @@ func ensureDaemon(socketPath string) error {
 		return fmt.Errorf("find executable: %w", err)
 	}
 
-	dir := filepath.Dir(sock)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create socket dir: %w", err)
-	}
-
-	logFile, err := os.CreateTemp(dir, "hauntty-server-*.log")
+	logFile, err := openDaemonLogFile(sock, logPath)
 	if err != nil {
-		return fmt.Errorf("create daemon log: %w", err)
+		return err
 	}
+	defer logFile.Close()
+	tempLog := logPath == ""
+	cleanupLogOnError := tempLog
+	defer func() {
+		if cleanupLogOnError {
+			os.Remove(logFile.Name())
+		}
+	}()
 
-	cmd := exec.Command(exe, "daemon")
-	if socketPath != "" {
-		cmd.Args = append(cmd.Args, "--socket", socketPath)
-	}
+	cmd := exec.Command(exe, daemonStartArgs(socketPath, autoExit)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = nil
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
-		os.Remove(logFile.Name())
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
-	finalPath := filepath.Join(dir, fmt.Sprintf("hauntty-server-%d.log", cmd.Process.Pid))
-	os.Rename(logFile.Name(), finalPath)
-	logFile.Close()
-	cmd.Process.Release()
+	if tempLog {
+		finalPath := filepath.Join(filepath.Dir(sock), fmt.Sprintf("hauntty-server-%d.log", cmd.Process.Pid))
+		if err := os.Rename(logFile.Name(), finalPath); err != nil {
+			return fmt.Errorf("rename daemon log file: %w", err)
+		}
+	}
+	cleanupLogOnError = false
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release daemon process: %w", err)
+	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -610,4 +646,28 @@ func ensureDaemon(socketPath string) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for daemon at %s", sock)
+}
+
+func openDaemonLogFile(sock string, logPath string) (*os.File, error) {
+	if logPath != "" {
+		if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+			return nil, fmt.Errorf("create daemon log directory: %w", err)
+		}
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, fmt.Errorf("open daemon log file: %w", err)
+		}
+		return f, nil
+	}
+
+	dir := filepath.Dir(sock)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create socket dir: %w", err)
+	}
+
+	f, err := os.CreateTemp(dir, "hauntty-server-*.log")
+	if err != nil {
+		return nil, fmt.Errorf("create daemon log: %w", err)
+	}
+	return f, nil
 }
