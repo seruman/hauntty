@@ -37,8 +37,8 @@ func socketFromCompletionArgs(a complete.Args) string {
 		if arg == "--socket" && i+1 < len(a.All) {
 			return a.All[i+1]
 		}
-		if strings.HasPrefix(arg, "--socket=") {
-			return strings.TrimPrefix(arg, "--socket=")
+		if after, ok := strings.CutPrefix(arg, "--socket="); ok {
+			return after
 		}
 	}
 	if socket := os.Getenv("HAUNTTY_SOCKET"); socket != "" {
