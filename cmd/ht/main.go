@@ -106,7 +106,7 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 
-	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), collectForwardedEnv(cfg.Session.ForwardEnv), 10000, cwd)
+	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Session.ForwardEnv), 10000, cwd)
 	if err != nil {
 		return err
 	}
@@ -353,22 +353,6 @@ func resolveCommand(command []string, cfg *config.Config) []string {
 		return nil
 	}
 	return strings.Fields(cfg.Session.DefaultCommand)
-}
-
-func collectForwardedEnv(extra []string) []string {
-	always := []string{"TERM", "SHELL"}
-	env := make([]string, 0, len(always)+len(extra))
-	for _, key := range always {
-		if val, ok := os.LookupEnv(key); ok {
-			env = append(env, key+"="+val)
-		}
-	}
-	for _, key := range extra {
-		if val, ok := os.LookupEnv(key); ok {
-			env = append(env, key+"="+val)
-		}
-	}
-	return env
 }
 
 func isInteractiveAttachTTY() bool {

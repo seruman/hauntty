@@ -32,8 +32,8 @@ var alwaysForwardEnv = []string{
 	"SHELL",
 }
 
-func collectEnv(extra []string) []string {
-	var env []string
+func CollectForwardedEnv(extra []string) []string {
+	env := make([]string, 0, len(alwaysForwardEnv)+len(extra))
 	for _, key := range alwaysForwardEnv {
 		if val, ok := os.LookupEnv(key); ok {
 			env = append(env, key+"="+val)
@@ -64,7 +64,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		return fmt.Errorf("get terminal size: %w", err)
 	}
 
-	env := collectEnv(forwardEnv)
+	env := CollectForwardedEnv(forwardEnv)
 
 	cwd, _ := os.Getwd()
 
