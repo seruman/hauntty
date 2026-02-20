@@ -22,27 +22,27 @@ import (
 	"code.selman.me/hauntty/internal/protocol"
 	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
-	kongcompletion "github.com/jotaen/kong-completion"
 	"golang.org/x/term"
 )
 
 type CLI struct {
-	Version    kong.VersionFlag          `help:"Print version."`
-	Socket     string                    `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
-	Attach     AttachCmd                 `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
-	New        NewCmd                    `cmd:"" help:"Create/start a session without attaching."`
-	List       ListCmd                   `cmd:"" aliases:"ls" help:"List sessions."`
-	Kill       KillCmd                   `cmd:"" help:"Kill a session."`
-	Send       SendCmd                   `cmd:"" help:"Send input to a session."`
-	Dump       DumpCmd                   `cmd:"" help:"Dump session contents."`
-	Detach     DetachCmd                 `cmd:"" help:"Detach from current session."`
-	Wait       WaitCmd                   `cmd:"" help:"Wait for session output to match a pattern."`
-	Status     StatusCmd                 `cmd:"" aliases:"st" help:"Show daemon and session status."`
-	Prune      PruneCmd                  `cmd:"" help:"Delete dead session state files."`
-	Init       InitCmd                   `cmd:"" help:"Create default config file."`
-	Config     ConfigCmd                 `cmd:"" help:"Print effective configuration."`
-	Daemon     DaemonCmd                 `cmd:"" help:"Start daemon in foreground."`
-	Completion kongcompletion.Completion `cmd:"" help:"Print shell completion setup instructions."`
+	Version    kong.VersionFlag `help:"Print version."`
+	Socket     string           `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
+	Attach     AttachCmd        `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
+	New        NewCmd           `cmd:"" help:"Create/start a session without attaching."`
+	List       ListCmd          `cmd:"" aliases:"ls" help:"List sessions."`
+	Kill       KillCmd          `cmd:"" help:"Kill a session."`
+	Send       SendCmd          `cmd:"" help:"Send input to a session."`
+	Dump       DumpCmd          `cmd:"" help:"Dump session contents."`
+	Detach     DetachCmd        `cmd:"" help:"Detach from current session."`
+	Wait       WaitCmd          `cmd:"" help:"Wait for session output to match a pattern."`
+	Status     StatusCmd        `cmd:"" aliases:"st" help:"Show daemon and session status."`
+	Prune      PruneCmd         `cmd:"" help:"Delete dead session state files."`
+	Init       InitCmd          `cmd:"" help:"Create default config file."`
+	Config     ConfigCmd        `cmd:"" help:"Print effective configuration."`
+	Daemon     DaemonCmd        `cmd:"" help:"Start daemon in foreground."`
+	Completion CompletionCmd    `cmd:"" help:"Print shell completion setup instructions."`
+	Complete   CompleteCmd      `cmd:"" hidden:"" name:"__complete" help:"Internal completion data provider."`
 }
 
 const (
@@ -51,7 +51,7 @@ const (
 )
 
 type AttachCmd struct {
-	Name    string   `arg:"" optional:"" help:"Session name." completion-predictor:"session"`
+	Name    string   `arg:"" optional:"" help:"Session name."`
 	Command []string `arg:"" optional:"" help:"Command to run."`
 }
 
@@ -177,7 +177,7 @@ func (cmd *ListCmd) Run(cfg *config.Config) error {
 }
 
 type KillCmd struct {
-	Name string `arg:"" help:"Session name." completion-predictor:"session"`
+	Name string `arg:"" help:"Session name."`
 }
 
 func (cmd *KillCmd) Run(cfg *config.Config) error {
@@ -195,7 +195,7 @@ func (cmd *KillCmd) Run(cfg *config.Config) error {
 }
 
 type SendCmd struct {
-	Name string   `arg:"" help:"Session name." completion-predictor:"session"`
+	Name string   `arg:"" help:"Session name."`
 	Text []string `arg:"" optional:"" help:"Text to send."`
 	Key  []string `short:"k" name:"key" help:"Key notation (repeatable)." sep:"none"`
 }
@@ -229,7 +229,7 @@ func (cmd *SendCmd) Run(cfg *config.Config) error {
 }
 
 type DumpCmd struct {
-	Name       string `arg:"" optional:"" help:"Session name (default: current session)." completion-predictor:"session"`
+	Name       string `arg:"" optional:"" help:"Session name (default: current session)."`
 	Format     string `enum:"plain,vt,html" default:"plain" help:"Output format (plain, vt, html)."`
 	Join       bool   `short:"J" help:"Join soft-wrapped lines."`
 	Scrollback bool   `short:"S" help:"Include scrollback history."`
@@ -360,7 +360,7 @@ func isInteractiveAttachTTY() bool {
 }
 
 type WaitCmd struct {
-	Name     string `arg:"" help:"Session name." completion-predictor:"session"`
+	Name     string `arg:"" help:"Session name."`
 	Pattern  string `arg:"" help:"Pattern to match."`
 	Regex    bool   `short:"e" help:"Use regex matching."`
 	Timeout  int    `short:"t" default:"30000" help:"Timeout in milliseconds."`
@@ -472,6 +472,33 @@ func (cmd *ConfigCmd) Run(cfg *config.Config) error {
 	return toml.NewEncoder(os.Stdout).Encode(cfg)
 }
 
+type CompleteCmd struct {
+	Topic string `arg:"" help:"Completion topic." enum:"sessions"`
+}
+
+func (cmd *CompleteCmd) Run(cfg *config.Config) error {
+	switch cmd.Topic {
+	case "sessions":
+		c, err := client.Connect(cfg.Daemon.SocketPath)
+		if err != nil {
+			return nil
+		}
+		defer c.Close()
+
+		sessions, err := c.List()
+		if err != nil {
+			return nil
+		}
+
+		for _, s := range sessions.Sessions {
+			fmt.Fprintln(os.Stdout, s.Name)
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
 type DaemonCmd struct {
 	AutoExit bool   `help:"Exit when last session dies."`
 	Detach   bool   `short:"d" help:"Run daemon in background and exit."`
@@ -545,8 +572,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	kongcompletion.Register(parser, kongcompletion.WithPredictor("session", sessionPredictor{}))
-
 	ctx, err := parser.Parse(os.Args[1:])
 	if err != nil {
 		parser.Printf("%s", err)
