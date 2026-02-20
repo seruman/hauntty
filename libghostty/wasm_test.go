@@ -21,7 +21,7 @@ func TestBasicFeedAndDump(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -38,7 +38,7 @@ func TestResize(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -58,7 +58,7 @@ func TestCursorPosition(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -80,7 +80,7 @@ func TestAltScreen(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -106,7 +106,7 @@ func TestMultipleTerminals(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term1 := newTerminal(t, rt, 80, 24, 1000)
 	defer term1.Close(ctx)
@@ -132,7 +132,7 @@ func TestDumpUnwrap(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	// 20-col terminal: 30 chars will soft-wrap onto two lines.
 	term := newTerminal(t, rt, 20, 24, 1000)
@@ -154,7 +154,7 @@ func TestDumpScrollback(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	// 80x5 terminal: 10 lines will push lines 1-6 into scrollback.
 	term := newTerminal(t, rt, 80, 5, 100)
@@ -182,7 +182,7 @@ func TestDumpHTML(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -199,7 +199,7 @@ func TestEncodeKey(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -257,7 +257,7 @@ func TestEncodeKeyKittyMode(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -283,7 +283,7 @@ func TestGetPwd(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
@@ -307,7 +307,7 @@ func TestReInit(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
-	defer rt.Close(ctx)
+	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
 	err = term.Feed(ctx, []byte("first session"))

@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"sync"
@@ -27,10 +28,7 @@ type Runtime struct {
 }
 
 func NewRuntime(ctx context.Context) (*Runtime, error) {
-	// TODO: can be set-up in init once, or lazy-initialized on first use.
-
 	rt := wazero.NewRuntime(ctx)
-
 	_, err := rt.NewHostModuleBuilder("env").
 		NewFunctionBuilder().
 		WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
@@ -127,8 +125,10 @@ func (r *Runtime) NewTerminal(ctx context.Context, cols, rows, scrollback uint32
 	return t, nil
 }
 
-func (r *Runtime) Close(ctx context.Context) error {
-	return r.rt.Close(ctx)
+var _ io.Closer = (*Runtime)(nil)
+
+func (r *Runtime) Close() error {
+	return r.rt.Close(context.Background())
 }
 
 type Terminal struct {
