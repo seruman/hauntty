@@ -46,14 +46,6 @@ func (c *Client) Close() error {
 	return c.netConn.Close()
 }
 
-func (c *Client) ReadMessage() (protocol.Message, error) {
-	return c.conn.ReadMessage()
-}
-
-func (c *Client) WriteMessage(msg protocol.Message) error {
-	return c.conn.WriteMessage(msg)
-}
-
 func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command []string, env []string, scrollback uint32, cwd string, readOnly bool) (*protocol.OK, *protocol.State, error) {
 	err := c.conn.WriteMessage(&protocol.Attach{
 		Name:            name,

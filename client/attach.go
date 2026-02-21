@@ -145,7 +145,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 						continue
 					}
 					mu.Lock()
-					werr := c.WriteMessage(&protocol.Resize{
+					werr := c.conn.WriteMessage(&protocol.Resize{
 						Cols:   uint16(ws.Col),
 						Rows:   uint16(ws.Row),
 						Xpixel: ws.Xpixel,
@@ -171,7 +171,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 				if i := findDetach(data, dk); i >= 0 {
 					if !readOnly && i > 0 {
 						mu.Lock()
-						werr := c.WriteMessage(&protocol.Input{Data: data[:i]})
+						werr := c.conn.WriteMessage(&protocol.Input{Data: data[:i]})
 						mu.Unlock()
 						if werr != nil {
 							return
@@ -185,7 +185,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 				}
 				if !readOnly {
 					mu.Lock()
-					werr := c.WriteMessage(&protocol.Input{Data: data})
+					werr := c.conn.WriteMessage(&protocol.Input{Data: data})
 					mu.Unlock()
 					if werr != nil {
 						return
@@ -215,7 +215,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 	}
 
 	for {
-		msg, err := c.ReadMessage()
+		msg, err := c.conn.ReadMessage()
 		if err != nil {
 			close(done)
 			if err == io.EOF || isConnClosed(err) {
