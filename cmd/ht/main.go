@@ -107,17 +107,9 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 
-	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Client.ForwardEnv), 10000, cwd, false)
+	ok, _, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Client.ForwardEnv), 10000, cwd, false)
 	if err != nil {
 		return err
-	}
-
-	msg, err := c.ReadMessage()
-	if err != nil {
-		return fmt.Errorf("read initial state: %w", err)
-	}
-	if _, isState := msg.(*protocol.State); !isState {
-		return fmt.Errorf("unexpected initial response type: 0x%02x", msg.Type())
 	}
 
 	if ok.Created {

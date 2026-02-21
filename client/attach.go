@@ -68,7 +68,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 
 	cwd, _ := os.Getwd()
 
-	ok, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd, readOnly)
+	ok, state, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd, readOnly)
 	if err != nil {
 		return err
 	}
@@ -87,19 +87,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		return fmt.Errorf("push kitty keyboard: %w", err)
 	}
 
-	var firstMsg protocol.Message
-	if ok.Created {
-		// New session: the terminal is empty so the STATE dump is
-		// useless. Read and discard it, then let shell output flow
-		// naturally from the current cursor position.
-		msg, err := c.ReadMessage()
-		if err != nil {
-			return fmt.Errorf("read initial message: %w", err)
-		}
-		if _, isState := msg.(*protocol.State); !isState {
-			firstMsg = msg
-		}
-	} else {
+	if !ok.Created && len(state.ScreenDump) > 0 {
 		// Reattach: preserve visible content in scrollback, then
 		// clear for the dump. Query cursor row via DSR so we
 		// scroll exactly the content-bearing rows — no blank
@@ -121,16 +109,8 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		clear.WriteString("\x1b[H")
 		os.Stdout.Write(clear.Bytes())
 
-		msg, err := c.ReadMessage()
-		if err != nil {
-			return fmt.Errorf("read initial message: %w", err)
-		}
-		if state, isState := msg.(*protocol.State); isState {
-			if _, err := os.Stdout.Write(state.ScreenDump); err != nil {
-				return fmt.Errorf("write state dump: %w", err)
-			}
-		} else {
-			firstMsg = msg
+		if _, err := os.Stdout.Write(state.ScreenDump); err != nil {
+			return fmt.Errorf("write state dump: %w", err)
 		}
 	}
 
@@ -232,14 +212,6 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			_ = m // informational, no action needed
 		}
 		return nil
-	}
-
-	if firstMsg != nil {
-		if err := handleMsg(firstMsg); err != nil {
-			close(done)
-			term.Restore(fd, oldState)
-			return err
-		}
 	}
 
 	for {
