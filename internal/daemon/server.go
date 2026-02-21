@@ -196,7 +196,7 @@ func (s *Server) handleConn(netConn net.Conn) {
 				attached.sendInputFrom(ac, m.Data)
 			}
 		case *protocol.Resize:
-			if ac != nil {
+			if ac != nil && !ac.readOnly {
 				ac.cols = m.Cols
 				ac.rows = m.Rows
 				ac.xpixel = m.Xpixel
@@ -318,7 +318,7 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 		return nil, nil, err
 	}
 
-	ac, aerr := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, clientRev)
+	ac, aerr := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, clientRev, msg.ReadOnly)
 	if aerr != nil {
 		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: aerr.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)

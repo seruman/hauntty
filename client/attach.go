@@ -56,7 +56,7 @@ func findDetach(data []byte, dk DetachKey) int {
 	return bytes.Index(data, dk.csiSeq)
 }
 
-func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardEnv []string) error {
+func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardEnv []string, readOnly bool) error {
 	fd := int(os.Stdin.Fd())
 
 	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
@@ -68,13 +68,15 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 
 	cwd, _ := os.Getwd()
 
-	ok, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd)
+	ok, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd, readOnly)
 	if err != nil {
 		return err
 	}
 
 	if ok.Created {
 		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", ok.SessionName, ok.PID)
+	} else if readOnly {
+		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", ok.SessionName, ok.PID)
 	} else {
 		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", ok.SessionName, ok.PID)
 	}
@@ -144,39 +146,41 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 	// mode-setting sequences in the state dump.
 	drainStdin(fd, 50*time.Millisecond)
 
-	sigwinch := make(chan os.Signal, 1)
-	signal.Notify(sigwinch, unix.SIGWINCH)
-	defer signal.Stop(sigwinch)
-
 	var (
 		mu   sync.Mutex
 		done = make(chan struct{})
 	)
 
-	go func() {
-		for {
-			select {
-			case <-sigwinch:
-				ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
-				if err != nil {
-					continue
-				}
-				mu.Lock()
-				werr := c.WriteMessage(&protocol.Resize{
-					Cols:   uint16(ws.Col),
-					Rows:   uint16(ws.Row),
-					Xpixel: ws.Xpixel,
-					Ypixel: ws.Ypixel,
-				})
-				mu.Unlock()
-				if werr != nil {
+	if !readOnly {
+		sigwinch := make(chan os.Signal, 1)
+		signal.Notify(sigwinch, unix.SIGWINCH)
+
+		go func() {
+			defer signal.Stop(sigwinch)
+			for {
+				select {
+				case <-sigwinch:
+					ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+					if err != nil {
+						continue
+					}
+					mu.Lock()
+					werr := c.WriteMessage(&protocol.Resize{
+						Cols:   uint16(ws.Col),
+						Rows:   uint16(ws.Row),
+						Xpixel: ws.Xpixel,
+						Ypixel: ws.Ypixel,
+					})
+					mu.Unlock()
+					if werr != nil {
+						return
+					}
+				case <-done:
 					return
 				}
-			case <-done:
-				return
 			}
-		}
-	}()
+		}()
+	}
 
 	go func() {
 		buf := make([]byte, 4096)
@@ -185,7 +189,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			if n > 0 {
 				data := buf[:n]
 				if i := findDetach(data, dk); i >= 0 {
-					if i > 0 {
+					if !readOnly && i > 0 {
 						mu.Lock()
 						werr := c.WriteMessage(&protocol.Input{Data: data[:i]})
 						mu.Unlock()
@@ -199,11 +203,13 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 					mu.Unlock()
 					return
 				}
-				mu.Lock()
-				werr := c.WriteMessage(&protocol.Input{Data: data})
-				mu.Unlock()
-				if werr != nil {
-					return
+				if !readOnly {
+					mu.Lock()
+					werr := c.WriteMessage(&protocol.Input{Data: data})
+					mu.Unlock()
+					if werr != nil {
+						return
+					}
 				}
 			}
 			if err != nil {

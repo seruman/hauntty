@@ -23,15 +23,16 @@ var feedPool = sync.Pool{
 }
 
 type attachedClient struct {
-	conn    *protocol.Conn
-	close   func() error
-	cols    uint16
-	rows    uint16
-	xpixel  uint16
-	ypixel  uint16
-	version string
-	outCh   chan []byte
-	done    chan struct{}
+	conn     *protocol.Conn
+	close    func() error
+	cols     uint16
+	rows     uint16
+	xpixel   uint16
+	ypixel   uint16
+	version  string
+	readOnly bool
+	outCh    chan []byte
+	done     chan struct{}
 }
 
 func (ac *attachedClient) writeLoop() {
@@ -269,10 +270,13 @@ func (s *Session) readLoop(ctx context.Context) {
 	}
 }
 
-func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string) (*attachedClient, error) {
+func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string, readOnly bool) (*attachedClient, error) {
 	// Resize before dumping so the screen dump reflects the dimensions
 	// that will be in effect once this client is added.
-	s.resizeForPendingClient(ctx, cols, rows, xpixel, ypixel)
+	// Read-only clients don't participate in resize arbitration.
+	if !readOnly {
+		s.resizeForPendingClient(ctx, cols, rows, xpixel, ypixel)
+	}
 
 	dump, err := s.term.DumpScreen(ctx, libghostty.DumpVTFull)
 	if err != nil {
@@ -289,20 +293,23 @@ func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn fun
 	}
 
 	ac := &attachedClient{
-		conn:    conn,
-		close:   closeConn,
-		cols:    cols,
-		rows:    rows,
-		xpixel:  xpixel,
-		ypixel:  ypixel,
-		version: version,
-		outCh:   make(chan []byte, 64),
-		done:    make(chan struct{}),
+		conn:     conn,
+		close:    closeConn,
+		cols:     cols,
+		rows:     rows,
+		xpixel:   xpixel,
+		ypixel:   ypixel,
+		version:  version,
+		readOnly: readOnly,
+		outCh:    make(chan []byte, 64),
+		done:     make(chan struct{}),
 	}
 	go ac.writeLoop()
 
 	s.addClient(ac)
-	s.arbitrateResize()
+	if !readOnly {
+		s.arbitrateResize()
+	}
 
 	return ac, nil
 }
@@ -445,6 +452,9 @@ func (s *Session) sendInput(data []byte) error {
 }
 
 func (s *Session) sendInputFrom(ac *attachedClient, data []byte) error {
+	if ac.readOnly {
+		return nil
+	}
 	s.clientMu.Lock()
 	s.activeClient = ac
 	s.clientMu.Unlock()
@@ -522,9 +532,12 @@ func applyResizePolicy(policy string, dims []clientDims) (cols, rows, xpixel, yp
 }
 
 func (s *Session) collectClientDims() []clientDims {
-	dims := make([]clientDims, len(s.clients))
-	for i, c := range s.clients {
-		dims[i] = clientDims{c.cols, c.rows, c.xpixel, c.ypixel}
+	dims := make([]clientDims, 0, len(s.clients))
+	for _, c := range s.clients {
+		if c.readOnly {
+			continue
+		}
+		dims = append(dims, clientDims{c.cols, c.rows, c.xpixel, c.ypixel})
 	}
 	return dims
 }

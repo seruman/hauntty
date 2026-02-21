@@ -51,8 +51,9 @@ const (
 )
 
 type AttachCmd struct {
-	Name    string   `arg:"" optional:"" help:"Session name."`
-	Command []string `arg:"" optional:"" help:"Command to run."`
+	Name     string   `arg:"" optional:"" help:"Session name."`
+	Command  []string `arg:"" optional:"" help:"Command to run."`
+	ReadOnly bool     `short:"r" help:"Attach in read-only mode (no input forwarded)."`
 }
 
 func (cmd *AttachCmd) Run(cfg *config.Config) error {
@@ -83,7 +84,7 @@ func (cmd *AttachCmd) Run(cfg *config.Config) error {
 
 	command := resolveCommand(cmd.Command, cfg)
 
-	return c.RunAttach(cmd.Name, command, dk, cfg.Session.ForwardEnv)
+	return c.RunAttach(cmd.Name, command, dk, cfg.Session.ForwardEnv, cmd.ReadOnly)
 }
 
 type NewCmd struct {
@@ -106,7 +107,7 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 
-	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Session.ForwardEnv), 10000, cwd)
+	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Session.ForwardEnv), 10000, cwd, false)
 	if err != nil {
 		return err
 	}
