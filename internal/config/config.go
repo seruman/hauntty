@@ -24,13 +24,13 @@ type DaemonConfig struct {
 }
 
 type ClientConfig struct {
-	DetachKeybind string `toml:"detach_keybind"`
+	DetachKeybind string   `toml:"detach_keybind"`
+	ForwardEnv    []string `toml:"forward_env"`
 }
 
 type SessionConfig struct {
-	DefaultCommand string   `toml:"default_command"`
-	ForwardEnv     []string `toml:"forward_env"`
-	ResizePolicy   string   `toml:"resize_policy"`
+	DefaultCommand string `toml:"default_command"`
+	ResizePolicy   string `toml:"resize_policy"`
 }
 
 func Default() *Config {
@@ -43,9 +43,9 @@ func Default() *Config {
 		Client: ClientConfig{
 			// TODO: ctrl+; requires kitty keyboard protocol, consider ctrl+]
 			DetachKeybind: "ctrl+;",
+			ForwardEnv:    []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},
 		},
 		Session: SessionConfig{
-			ForwardEnv:   []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},
 			ResizePolicy: "smallest",
 		},
 	}

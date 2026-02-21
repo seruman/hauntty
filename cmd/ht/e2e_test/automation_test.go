@@ -92,7 +92,7 @@ func TestWaitRegex(t *testing.T) {
 func TestDumpPlain(t *testing.T) {
 	cfg := config.Default()
 	cfg.Client.DetachKeybind = "ctrl+]"
-	cfg.Session.ForwardEnv = []string{"PS1"}
+	cfg.Client.ForwardEnv = []string{"PS1"}
 	e := setup(t, cfg)
 
 	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})

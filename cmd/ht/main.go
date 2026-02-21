@@ -84,7 +84,7 @@ func (cmd *AttachCmd) Run(cfg *config.Config) error {
 
 	command := resolveCommand(cmd.Command, cfg)
 
-	return c.RunAttach(cmd.Name, command, dk, cfg.Session.ForwardEnv, cmd.ReadOnly)
+	return c.RunAttach(cmd.Name, command, dk, cfg.Client.ForwardEnv, cmd.ReadOnly)
 }
 
 type NewCmd struct {
@@ -107,7 +107,7 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 
-	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Session.ForwardEnv), 10000, cwd, false)
+	ok, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Client.ForwardEnv), 10000, cwd, false)
 	if err != nil {
 		return err
 	}

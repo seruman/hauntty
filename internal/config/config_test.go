@@ -15,7 +15,7 @@ func TestDefaults(t *testing.T) {
 	assert.Equal(t, cfg.Daemon.StatePersistenceInterval, 30)
 	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+;")
 	assert.Equal(t, cfg.Session.DefaultCommand, "")
-	assert.DeepEqual(t, cfg.Session.ForwardEnv, []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"})
+	assert.DeepEqual(t, cfg.Client.ForwardEnv, []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"})
 	assert.Equal(t, cfg.Session.ResizePolicy, "smallest")
 }
 
@@ -50,10 +50,10 @@ auto_exit = true
 
 [client]
 detach_keybind = "ctrl+q"
+forward_env = ["TERM"]
 
 [session]
 default_command = "/usr/bin/fish"
-forward_env = ["TERM"]
 `), 0o600)
 	assert.NilError(t, err)
 
@@ -62,8 +62,8 @@ forward_env = ["TERM"]
 	assert.Equal(t, cfg.Daemon.DefaultScrollback, uint32(5000))
 	assert.Equal(t, cfg.Daemon.AutoExit, true)
 	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+q")
+	assert.DeepEqual(t, cfg.Client.ForwardEnv, []string{"TERM"})
 	assert.Equal(t, cfg.Session.DefaultCommand, "/usr/bin/fish")
-	assert.DeepEqual(t, cfg.Session.ForwardEnv, []string{"TERM"})
 }
 
 func TestLoadInvalid(t *testing.T) {
