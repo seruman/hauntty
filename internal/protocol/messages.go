@@ -2,7 +2,7 @@ package protocol
 
 const (
 	// Client → Daemon
-	TypeAttach  uint8 = 0x01
+	TypeCreate  uint8 = 0x01
 	TypeInput   uint8 = 0x02
 	TypeResize  uint8 = 0x03
 	TypeDetach  uint8 = 0x04
@@ -13,24 +13,47 @@ const (
 	TypePrune   uint8 = 0x09
 	TypeSendKey uint8 = 0x0A
 	TypeStatus  uint8 = 0x0C
+	TypeAttach  uint8 = 0x0D
 
 	// Daemon → Client
 	TypeOK             uint8 = 0x80
 	TypeError          uint8 = 0x81
 	TypeOutput         uint8 = 0x82
-	TypeState          uint8 = 0x83
+	TypeCreated        uint8 = 0x83
 	TypeSessions       uint8 = 0x84
 	TypeExited         uint8 = 0x85
 	TypeDumpResponse   uint8 = 0x86
 	TypePruneResponse  uint8 = 0x87
 	TypeClientsChanged uint8 = 0x88
 	TypeStatusResponse uint8 = 0x89
+	TypeAttached       uint8 = 0x8A
 )
 
 type Message interface {
 	Type() uint8
 	encode(*Encoder) error
 	decode(*Decoder) error
+}
+
+type CreateMode uint8
+
+const (
+	CreateModeRequireNew   CreateMode = 1
+	CreateModeOpenOrCreate CreateMode = 2
+)
+
+type CreateOutcome uint8
+
+const (
+	CreateOutcomeCreated  CreateOutcome = 1
+	CreateOutcomeExisting CreateOutcome = 2
+)
+
+type ClientInfo struct {
+	ClientID string
+	TTY      string
+	ReadOnly bool
+	Version  string
 }
 
 type Session struct {
@@ -41,21 +64,92 @@ type Session struct {
 	PID       uint32
 	CreatedAt uint32
 	CWD       string
+	Clients   []ClientInfo
 }
 
 // --- Client → Daemon messages ---
 
+type Create struct {
+	Name    string
+	Command []string
+	Env     []string
+	CWD     string
+	Mode    CreateMode
+}
+
+func (m *Create) Type() uint8 { return TypeCreate }
+
+func (m *Create) encode(e *Encoder) error {
+	if err := e.WriteString(m.Name); err != nil {
+		return err
+	}
+	if err := e.WriteU32(uint32(len(m.Command))); err != nil {
+		return err
+	}
+	for _, s := range m.Command {
+		if err := e.WriteString(s); err != nil {
+			return err
+		}
+	}
+	if err := e.WriteU32(uint32(len(m.Env))); err != nil {
+		return err
+	}
+	for _, s := range m.Env {
+		if err := e.WriteString(s); err != nil {
+			return err
+		}
+	}
+	if err := e.WriteString(m.CWD); err != nil {
+		return err
+	}
+	return e.WriteU8(uint8(m.Mode))
+}
+
+func (m *Create) decode(d *Decoder) error {
+	var err error
+	if m.Name, err = d.ReadString(); err != nil {
+		return err
+	}
+	cmdCount, err := d.ReadU32()
+	if err != nil {
+		return err
+	}
+	m.Command = make([]string, int(cmdCount))
+	for i := range m.Command {
+		if m.Command[i], err = d.ReadString(); err != nil {
+			return err
+		}
+	}
+	envCount, err := d.ReadU32()
+	if err != nil {
+		return err
+	}
+	m.Env = make([]string, int(envCount))
+	for i := range m.Env {
+		if m.Env[i], err = d.ReadString(); err != nil {
+			return err
+		}
+	}
+	if m.CWD, err = d.ReadString(); err != nil {
+		return err
+	}
+	mode, err := d.ReadU8()
+	if err != nil {
+		return err
+	}
+	m.Mode = CreateMode(mode)
+	return nil
+}
+
 type Attach struct {
-	Name            string
-	Cols            uint16
-	Rows            uint16
-	Xpixel          uint16
-	Ypixel          uint16
-	Command         []string
-	Env             []string
-	ScrollbackLines uint32
-	CWD             string
-	ReadOnly        bool
+	Name        string
+	Cols        uint16
+	Rows        uint16
+	Xpixel      uint16
+	Ypixel      uint16
+	ReadOnly    bool
+	ClientTTY   string
+	AttachToken string
 }
 
 func (m *Attach) Type() uint8 { return TypeAttach }
@@ -76,29 +170,13 @@ func (m *Attach) encode(e *Encoder) error {
 	if err := e.WriteU16(m.Ypixel); err != nil {
 		return err
 	}
-	if err := e.WriteU32(uint32(len(m.Command))); err != nil {
+	if err := e.WriteBool(m.ReadOnly); err != nil {
 		return err
 	}
-	for _, s := range m.Command {
-		if err := e.WriteString(s); err != nil {
-			return err
-		}
-	}
-	if err := e.WriteU32(uint32(len(m.Env))); err != nil {
+	if err := e.WriteString(m.ClientTTY); err != nil {
 		return err
 	}
-	for _, s := range m.Env {
-		if err := e.WriteString(s); err != nil {
-			return err
-		}
-	}
-	if err := e.WriteU32(m.ScrollbackLines); err != nil {
-		return err
-	}
-	if err := e.WriteString(m.CWD); err != nil {
-		return err
-	}
-	return e.WriteBool(m.ReadOnly)
+	return e.WriteString(m.AttachToken)
 }
 
 func (m *Attach) decode(d *Decoder) error {
@@ -118,33 +196,13 @@ func (m *Attach) decode(d *Decoder) error {
 	if m.Ypixel, err = d.ReadU16(); err != nil {
 		return err
 	}
-	cmdCount, err := d.ReadU32()
-	if err != nil {
+	if m.ReadOnly, err = d.ReadBool(); err != nil {
 		return err
 	}
-	m.Command = make([]string, cmdCount)
-	for i := range m.Command {
-		if m.Command[i], err = d.ReadString(); err != nil {
-			return err
-		}
-	}
-	envCount, err := d.ReadU32()
-	if err != nil {
+	if m.ClientTTY, err = d.ReadString(); err != nil {
 		return err
 	}
-	m.Env = make([]string, envCount)
-	for i := range m.Env {
-		if m.Env[i], err = d.ReadString(); err != nil {
-			return err
-		}
-	}
-	if m.ScrollbackLines, err = d.ReadU32(); err != nil {
-		return err
-	}
-	if m.CWD, err = d.ReadString(); err != nil {
-		return err
-	}
-	m.ReadOnly, err = d.ReadBool()
+	m.AttachToken, err = d.ReadString()
 	return err
 }
 
@@ -202,26 +260,50 @@ func (m *Resize) decode(d *Decoder) error {
 }
 
 type Detach struct {
-	Name string // Empty = detach self, non-empty = detach named session.
+	Name           string
+	TargetClientID string
+	TargetTTY      string
 }
 
 func (m *Detach) Type() uint8 { return TypeDetach }
 
 func (m *Detach) encode(e *Encoder) error {
-	return e.WriteString(m.Name)
+	if err := e.WriteString(m.Name); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.TargetClientID); err != nil {
+		return err
+	}
+	return e.WriteString(m.TargetTTY)
 }
 
 func (m *Detach) decode(d *Decoder) error {
 	var err error
-	m.Name, err = d.ReadString()
+	if m.Name, err = d.ReadString(); err != nil {
+		return err
+	}
+	if m.TargetClientID, err = d.ReadString(); err != nil {
+		return err
+	}
+	m.TargetTTY, err = d.ReadString()
 	return err
 }
 
-type List struct{}
+type List struct {
+	IncludeClients bool
+}
 
-func (m *List) Type() uint8             { return TypeList }
-func (m *List) encode(_ *Encoder) error { return nil }
-func (m *List) decode(_ *Decoder) error { return nil }
+func (m *List) Type() uint8 { return TypeList }
+
+func (m *List) encode(e *Encoder) error {
+	return e.WriteBool(m.IncludeClients)
+}
+
+func (m *List) decode(d *Decoder) error {
+	var err error
+	m.IncludeClients, err = d.ReadBool()
+	return err
+}
 
 type Kill struct {
 	Name string
@@ -323,69 +405,70 @@ func (m *Prune) decode(_ *Decoder) error { return nil }
 
 // --- Daemon → Client messages ---
 
-type OK struct {
-	SessionName string
-	Cols        uint16
-	Rows        uint16
-	PID         uint32
-	Created     bool
+type OK struct{}
+
+func (m *OK) Type() uint8             { return TypeOK }
+func (m *OK) encode(_ *Encoder) error { return nil }
+func (m *OK) decode(_ *Decoder) error { return nil }
+
+type Created struct {
+	SessionName          string
+	PID                  uint32
+	Outcome              CreateOutcome
+	AttachToken          string
+	AttachTokenExpiresAt uint64
 }
 
-func (m *OK) Type() uint8 { return TypeOK }
+func (m *Created) Type() uint8 { return TypeCreated }
 
-func (m *OK) encode(e *Encoder) error {
+func (m *Created) encode(e *Encoder) error {
 	if err := e.WriteString(m.SessionName); err != nil {
-		return err
-	}
-	if err := e.WriteU16(m.Cols); err != nil {
-		return err
-	}
-	if err := e.WriteU16(m.Rows); err != nil {
 		return err
 	}
 	if err := e.WriteU32(m.PID); err != nil {
 		return err
 	}
-	return e.WriteBool(m.Created)
+	if err := e.WriteU8(uint8(m.Outcome)); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.AttachToken); err != nil {
+		return err
+	}
+	return e.WriteU64(m.AttachTokenExpiresAt)
 }
 
-func (m *OK) decode(d *Decoder) error {
+func (m *Created) decode(d *Decoder) error {
 	var err error
 	if m.SessionName, err = d.ReadString(); err != nil {
-		return err
-	}
-	if m.Cols, err = d.ReadU16(); err != nil {
-		return err
-	}
-	if m.Rows, err = d.ReadU16(); err != nil {
 		return err
 	}
 	if m.PID, err = d.ReadU32(); err != nil {
 		return err
 	}
-	m.Created, err = d.ReadBool()
+	outcome, err := d.ReadU8()
+	if err != nil {
+		return err
+	}
+	m.Outcome = CreateOutcome(outcome)
+	if m.AttachToken, err = d.ReadString(); err != nil {
+		return err
+	}
+	m.AttachTokenExpiresAt, err = d.ReadU64()
 	return err
 }
 
 type Error struct {
-	Code    uint16
 	Message string
 }
 
 func (m *Error) Type() uint8 { return TypeError }
 
 func (m *Error) encode(e *Encoder) error {
-	if err := e.WriteU16(m.Code); err != nil {
-		return err
-	}
 	return e.WriteString(m.Message)
 }
 
 func (m *Error) decode(d *Decoder) error {
 	var err error
-	if m.Code, err = d.ReadU16(); err != nil {
-		return err
-	}
 	m.Message, err = d.ReadString()
 	return err
 }
@@ -406,16 +489,36 @@ func (m *Output) decode(d *Decoder) error {
 	return err
 }
 
-type State struct {
+type Attached struct {
+	SessionName       string
+	Cols              uint16
+	Rows              uint16
+	PID               uint32
+	ClientID          string
 	ScreenDump        []byte
 	CursorRow         uint32
 	CursorCol         uint32
 	IsAlternateScreen bool
 }
 
-func (m *State) Type() uint8 { return TypeState }
+func (m *Attached) Type() uint8 { return TypeAttached }
 
-func (m *State) encode(e *Encoder) error {
+func (m *Attached) encode(e *Encoder) error {
+	if err := e.WriteString(m.SessionName); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Cols); err != nil {
+		return err
+	}
+	if err := e.WriteU16(m.Rows); err != nil {
+		return err
+	}
+	if err := e.WriteU32(m.PID); err != nil {
+		return err
+	}
+	if err := e.WriteString(m.ClientID); err != nil {
+		return err
+	}
 	if err := e.WriteBytes(m.ScreenDump); err != nil {
 		return err
 	}
@@ -428,8 +531,23 @@ func (m *State) encode(e *Encoder) error {
 	return e.WriteBool(m.IsAlternateScreen)
 }
 
-func (m *State) decode(d *Decoder) error {
+func (m *Attached) decode(d *Decoder) error {
 	var err error
+	if m.SessionName, err = d.ReadString(); err != nil {
+		return err
+	}
+	if m.Cols, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.Rows, err = d.ReadU16(); err != nil {
+		return err
+	}
+	if m.PID, err = d.ReadU32(); err != nil {
+		return err
+	}
+	if m.ClientID, err = d.ReadString(); err != nil {
+		return err
+	}
 	if m.ScreenDump, err = d.ReadBytes(); err != nil {
 		return err
 	}
@@ -448,6 +566,34 @@ type Sessions struct {
 }
 
 func (m *Sessions) Type() uint8 { return TypeSessions }
+
+func encodeClientInfo(e *Encoder, c *ClientInfo) error {
+	if err := e.WriteString(c.ClientID); err != nil {
+		return err
+	}
+	if err := e.WriteString(c.TTY); err != nil {
+		return err
+	}
+	if err := e.WriteBool(c.ReadOnly); err != nil {
+		return err
+	}
+	return e.WriteString(c.Version)
+}
+
+func decodeClientInfo(d *Decoder, c *ClientInfo) error {
+	var err error
+	if c.ClientID, err = d.ReadString(); err != nil {
+		return err
+	}
+	if c.TTY, err = d.ReadString(); err != nil {
+		return err
+	}
+	if c.ReadOnly, err = d.ReadBool(); err != nil {
+		return err
+	}
+	c.Version, err = d.ReadString()
+	return err
+}
 
 func (m *Sessions) encode(e *Encoder) error {
 	if err := e.WriteU32(uint32(len(m.Sessions))); err != nil {
@@ -476,6 +622,14 @@ func (m *Sessions) encode(e *Encoder) error {
 		if err := e.WriteString(s.CWD); err != nil {
 			return err
 		}
+		if err := e.WriteU32(uint32(len(s.Clients))); err != nil {
+			return err
+		}
+		for j := range s.Clients {
+			if err := encodeClientInfo(e, &s.Clients[j]); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -485,7 +639,7 @@ func (m *Sessions) decode(d *Decoder) error {
 	if err != nil {
 		return err
 	}
-	m.Sessions = make([]Session, count)
+	m.Sessions = make([]Session, int(count))
 	for i := range m.Sessions {
 		s := &m.Sessions[i]
 		if s.Name, err = d.ReadString(); err != nil {
@@ -508,6 +662,16 @@ func (m *Sessions) decode(d *Decoder) error {
 		}
 		if s.CWD, err = d.ReadString(); err != nil {
 			return err
+		}
+		clientCount, err := d.ReadU32()
+		if err != nil {
+			return err
+		}
+		s.Clients = make([]ClientInfo, int(clientCount))
+		for j := range s.Clients {
+			if err := decodeClientInfo(d, &s.Clients[j]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -617,14 +781,13 @@ type DaemonStatus struct {
 }
 
 type SessionStatus struct {
-	Name           string
-	State          string
-	Cols           uint16
-	Rows           uint16
-	PID            uint32
-	CWD            string
-	ClientCount    uint32
-	ClientVersions []string
+	Name    string
+	State   string
+	Cols    uint16
+	Rows    uint16
+	PID     uint32
+	CWD     string
+	Clients []ClientInfo
 }
 
 type StatusResponse struct {
@@ -677,14 +840,11 @@ func (m *StatusResponse) encode(e *Encoder) error {
 	if err := e.WriteString(m.Session.CWD); err != nil {
 		return err
 	}
-	if err := e.WriteU32(m.Session.ClientCount); err != nil {
+	if err := e.WriteU32(uint32(len(m.Session.Clients))); err != nil {
 		return err
 	}
-	if err := e.WriteU32(uint32(len(m.Session.ClientVersions))); err != nil {
-		return err
-	}
-	for _, v := range m.Session.ClientVersions {
-		if err := e.WriteString(v); err != nil {
+	for i := range m.Session.Clients {
+		if err := encodeClientInfo(e, &m.Session.Clients[i]); err != nil {
 			return err
 		}
 	}
@@ -737,16 +897,13 @@ func (m *StatusResponse) decode(d *Decoder) error {
 	if m.Session.CWD, err = d.ReadString(); err != nil {
 		return err
 	}
-	if m.Session.ClientCount, err = d.ReadU32(); err != nil {
-		return err
-	}
-	cvCount, err := d.ReadU32()
+	clientCount, err := d.ReadU32()
 	if err != nil {
 		return err
 	}
-	m.Session.ClientVersions = make([]string, cvCount)
-	for i := range cvCount {
-		if m.Session.ClientVersions[i], err = d.ReadString(); err != nil {
+	m.Session.Clients = make([]ClientInfo, int(clientCount))
+	for i := range m.Session.Clients {
+		if err := decodeClientInfo(d, &m.Session.Clients[i]); err != nil {
 			return err
 		}
 	}

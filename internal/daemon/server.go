@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -37,6 +38,12 @@ type Server struct {
 	defaultScrollback uint32
 	resizePolicy      string
 	autoExit          bool
+	deadSessionTTL    time.Duration
+	attachLeaseTTL    time.Duration
+	deadTimers        map[string]*time.Timer
+	deadTimerAt       map[string]time.Time
+	attachLeases      map[string]*attachLease
+	clientIDCounter   atomic.Uint64
 	shutdownOnce      sync.Once
 	startedAt         time.Time
 }
@@ -59,6 +66,11 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy string) (*S
 		defaultScrollback: cfg.DefaultScrollback,
 		resizePolicy:      resizePolicy,
 		autoExit:          cfg.AutoExit,
+		deadSessionTTL:    time.Duration(cfg.DeadSessionTTLSeconds) * time.Second,
+		attachLeaseTTL:    5 * time.Second,
+		deadTimers:        make(map[string]*time.Timer),
+		deadTimerAt:       make(map[string]time.Time),
+		attachLeases:      make(map[string]*attachLease),
 		startedAt:         time.Now(),
 	}
 
@@ -185,6 +197,8 @@ func (s *Server) handleConn(netConn net.Conn) {
 		}
 
 		switch m := msg.(type) {
+		case *protocol.Create:
+			s.handleCreate(conn, m)
 		case *protocol.Attach:
 			attached, ac, err = s.handleAttach(conn, netConn.Close, m, clientRev)
 			if err != nil {
@@ -208,16 +222,34 @@ func (s *Server) handleConn(netConn net.Conn) {
 				s.mu.RLock()
 				target := s.sessions[m.Name]
 				s.mu.RUnlock()
-				if target != nil {
-					target.disconnectActiveClient()
+				if target == nil {
+					_ = conn.WriteMessage(&protocol.Error{Message: "session not found"})
+					continue
 				}
+				if m.TargetClientID != "" {
+					if !target.disconnectClientByID(m.TargetClientID) {
+						_ = conn.WriteMessage(&protocol.Error{Message: "client not found"})
+						continue
+					}
+				} else if m.TargetTTY != "" {
+					if !target.disconnectClientByTTY(m.TargetTTY) {
+						_ = conn.WriteMessage(&protocol.Error{Message: "client not found"})
+						continue
+					}
+				} else {
+					if !target.disconnectActiveClient() {
+						_ = conn.WriteMessage(&protocol.Error{Message: "client not found"})
+						continue
+					}
+				}
+				_ = conn.WriteMessage(&protocol.OK{})
 			} else if attached != nil {
 				attached.detachClient(ac)
 				attached = nil
 				ac = nil
 			}
 		case *protocol.List:
-			s.handleList(conn)
+			s.handleList(conn, m)
 		case *protocol.Kill:
 			s.handleKill(conn, m)
 		case *protocol.Send:
@@ -238,98 +270,178 @@ func (s *Server) handleConn(netConn net.Conn) {
 	}
 }
 
-func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach, clientRev string) (*Session, *attachedClient, error) {
-	name := msg.Name
-
-	s.mu.RLock()
+func (s *Server) ensureSession(name string, command []string, env []string, cwd string) (*Session, protocol.CreateOutcome, error) {
 	if name == "" {
+		s.mu.RLock()
 		existing := make(map[string]bool, len(s.sessions))
 		for k := range s.sessions {
 			existing[k] = true
 		}
+		s.mu.RUnlock()
 		name = generateUniqueName(existing)
 	}
+
+	s.mu.RLock()
 	sess := s.sessions[name]
 	s.mu.RUnlock()
+	if sess != nil {
+		s.stopDeadTimer(name)
+		return sess, protocol.CreateOutcomeExisting, nil
+	}
 
-	created := false
+	const defaultCols uint16 = 80
+	const defaultRows uint16 = 24
+
+	var err error
+	scrollback := s.defaultScrollback
+	if state, serr := LoadState(name); serr == nil {
+		slog.Info("restoring dead session", "session", name)
+		sess, err = restoreSession(s.ctx, name, command, env, defaultCols, defaultRows, 0, 0, scrollback, s.wasmRT, state, s.resizePolicy, cwd)
+		if err == nil {
+			CleanState(name)
+		}
+	}
 	if sess == nil {
-		scrollback := msg.ScrollbackLines
-		if scrollback == 0 {
-			scrollback = s.defaultScrollback
-		}
+		sess, err = newSession(s.ctx, name, command, env, defaultCols, defaultRows, 0, 0, scrollback, s.wasmRT, s.resizePolicy, cwd)
+	}
+	if err != nil {
+		return nil, 0, err
+	}
 
-		var err error
-		if state, serr := LoadState(name); serr == nil {
-			slog.Info("restoring dead session", "session", name)
-			sess, err = restoreSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, state, s.resizePolicy, msg.CWD)
-			if err == nil {
-				CleanState(name)
-			}
-		}
-		if sess == nil {
-			sess, err = newSession(s.ctx, name, msg.Command, msg.Env, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, scrollback, s.wasmRT, s.resizePolicy, msg.CWD)
-		}
-		if err != nil {
-			if werr := conn.WriteMessage(&protocol.Error{Code: 1, Message: err.Error()}); werr != nil {
-				slog.Debug("write error response", "err", werr)
-			}
-			return nil, nil, err
-		}
+	s.mu.Lock()
+	if existing, ok := s.sessions[name]; ok {
+		s.mu.Unlock()
+		sess.close(s.ctx)
+		s.stopDeadTimer(name)
+		return existing, protocol.CreateOutcomeExisting, nil
+	}
+	s.sessions[name] = sess
+	go s.watchSession(sess)
+	s.mu.Unlock()
 
-		// Check-and-insert: another goroutine may have raced us for the
-		// same auto-generated name. If so, close our duplicate and use
-		// the winner's session. This wastes a PTY+WASM init but avoids
-		// holding mu across the heavy creation path.
-		s.mu.Lock()
-		if existing, ok := s.sessions[name]; ok {
-			s.mu.Unlock()
-			sess.close(s.ctx)
-			sess = existing
-		} else {
-			s.sessions[name] = sess
-			created = true
-			go func() {
-				<-sess.done
-				s.mu.Lock()
-				currentName := sess.Name
-				delete(s.sessions, currentName)
-				empty := len(s.sessions) == 0
-				s.mu.Unlock()
-				CleanState(currentName)
-				if s.autoExit && empty {
-					slog.Info("auto-exit: last session ended, shutting down")
-					s.Shutdown()
-				}
-			}()
-			s.mu.Unlock()
+	return sess, protocol.CreateOutcomeCreated, nil
+}
+
+func (s *Server) handleCreate(conn *protocol.Conn, msg *protocol.Create) {
+	sess, outcome, err := s.ensureSession(msg.Name, msg.Command, msg.Env, msg.CWD)
+	if err != nil {
+		if werr := conn.WriteMessage(&protocol.Error{Message: err.Error()}); werr != nil {
+			slog.Debug("write create error response", "err", werr)
+		}
+		return
+	}
+
+	if msg.Mode == protocol.CreateModeRequireNew && outcome == protocol.CreateOutcomeExisting {
+		if err := conn.WriteMessage(&protocol.Error{Message: fmt.Sprintf("session %q already exists", sess.Name)}); err != nil {
+			slog.Debug("write create error response", "err", err)
+		}
+		return
+	}
+
+	token, tokenExpires := s.issueAttachLease(sess.Name)
+	if err := conn.WriteMessage(&protocol.Created{SessionName: sess.Name, PID: sess.PID, Outcome: outcome, AttachToken: token, AttachTokenExpiresAt: tokenExpires}); err != nil {
+		slog.Debug("write created response", "err", err)
+	}
+}
+
+func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach, clientRev string) (*Session, *attachedClient, error) {
+	if msg.AttachToken != "" {
+		if !s.consumeAttachLease(msg.Name, msg.AttachToken) {
+			if err := conn.WriteMessage(&protocol.Error{Message: "invalid or expired attach token"}); err != nil {
+				slog.Debug("write attach error response", "err", err)
+			}
+			return nil, nil, fmt.Errorf("invalid or expired attach token")
 		}
 	}
 
-	cols, rows := sess.size()
-	err := conn.WriteMessage(&protocol.OK{
-		SessionName: sess.Name,
-		Cols:        cols,
-		Rows:        rows,
-		PID:         sess.PID,
-		Created:     created,
-	})
+	s.mu.RLock()
+	sess := s.sessions[msg.Name]
+	s.mu.RUnlock()
+	if sess == nil {
+		if err := conn.WriteMessage(&protocol.Error{Message: "session not found"}); err != nil {
+			slog.Debug("write attach error response", "err", err)
+		}
+		return nil, nil, fmt.Errorf("session not found")
+	}
+
+	clientID := s.nextClientID()
+	attached, ac, err := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, clientRev, msg.ReadOnly, msg.ClientTTY, clientID)
 	if err != nil {
+		if werr := conn.WriteMessage(&protocol.Error{Message: err.Error()}); werr != nil {
+			slog.Debug("write attach error response", "err", werr)
+		}
 		return nil, nil, err
 	}
-
-	ac, aerr := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, clientRev, msg.ReadOnly)
-	if aerr != nil {
-		if werr := conn.WriteMessage(&protocol.Error{Code: 2, Message: aerr.Error()}); werr != nil {
-			slog.Debug("write error response", "err", werr)
-		}
-		return nil, nil, aerr
+	if err := conn.WriteMessage(attached); err != nil {
+		return nil, nil, err
 	}
-
+	if !sess.isRunning() {
+		if err := conn.WriteMessage(&protocol.Exited{ExitCode: sess.exitCode}); err != nil {
+			slog.Debug("write exited response", "err", err)
+		}
+		return nil, nil, nil
+	}
 	return sess, ac, nil
 }
 
-func (s *Server) handleList(conn *protocol.Conn) {
+func (s *Server) nextClientID() string {
+	id := s.clientIDCounter.Add(1)
+	return strconv.FormatUint(id, 10)
+}
+
+func (s *Server) stopDeadTimer(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.deadTimers[name]
+	if t == nil {
+		return
+	}
+	delete(s.deadTimers, name)
+	delete(s.deadTimerAt, name)
+	t.Stop()
+}
+
+func (s *Server) watchSession(sess *Session) {
+	<-sess.done
+
+	s.mu.Lock()
+	if s.deadSessionTTL <= 0 {
+		delete(s.sessions, sess.Name)
+		empty := s.runningCountLocked() == 0
+		s.mu.Unlock()
+		if s.autoExit && empty {
+			slog.Info("auto-exit: last session ended, shutting down")
+			s.Shutdown()
+		}
+		return
+	}
+
+	target := time.Now().Add(s.deadSessionTTL)
+	leaseUntil := s.maxLeaseExpiryLocked(sess.Name)
+	if leaseUntil.After(target) {
+		target = leaseUntil
+	}
+	s.scheduleDeadTimerLocked(sess.Name, target)
+	empty := s.runningCountLocked() == 0
+	s.mu.Unlock()
+
+	if s.autoExit && empty {
+		slog.Info("auto-exit: last session ended, shutting down")
+		s.Shutdown()
+	}
+}
+
+func (s *Server) runningCountLocked() int {
+	count := 0
+	for _, sess := range s.sessions {
+		if sess.isRunning() {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *Server) handleList(conn *protocol.Conn, req *protocol.List) {
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
 
@@ -343,6 +455,15 @@ func (s *Server) handleList(conn *protocol.Conn) {
 			state = "dead"
 		}
 		cols, rows := sess.size()
+		clients := []protocol.ClientInfo(nil)
+		if req.IncludeClients {
+			sess.clientMu.Lock()
+			clients = make([]protocol.ClientInfo, 0, len(sess.clients))
+			for _, ac := range sess.clients {
+				clients = append(clients, protocol.ClientInfo{ClientID: ac.id, TTY: ac.tty, ReadOnly: ac.readOnly, Version: ac.version})
+			}
+			sess.clientMu.Unlock()
+		}
 		sessions = append(sessions, protocol.Session{
 			Name:      sess.Name,
 			State:     state,
@@ -351,6 +472,7 @@ func (s *Server) handleList(conn *protocol.Conn) {
 			PID:       sess.PID,
 			CreatedAt: uint32(sess.CreatedAt.Unix()),
 			CWD:       sess.term.GetPwd(ctx),
+			Clients:   clients,
 		})
 	}
 	s.mu.RUnlock()
@@ -377,14 +499,14 @@ func (s *Server) handleKill(conn *protocol.Conn, msg *protocol.Kill) {
 	s.mu.RUnlock()
 
 	if !ok {
-		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+		if err := conn.WriteMessage(&protocol.Error{Message: "session not found"}); err != nil {
 			slog.Debug("write error response", "err", err)
 		}
 		return
 	}
 
 	sess.kill()
-	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.Name}); err != nil {
+	if err := conn.WriteMessage(&protocol.OK{}); err != nil {
 		slog.Debug("write ok response", "err", err)
 	}
 }
@@ -395,19 +517,19 @@ func (s *Server) handleSend(conn *protocol.Conn, msg *protocol.Send) {
 	s.mu.RUnlock()
 
 	if !ok {
-		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+		if err := conn.WriteMessage(&protocol.Error{Message: "session not found"}); err != nil {
 			slog.Debug("write error response", "err", err)
 		}
 		return
 	}
 
 	if err := sess.sendInput(msg.Data); err != nil {
-		if werr := conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()}); werr != nil {
+		if werr := conn.WriteMessage(&protocol.Error{Message: err.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
 		}
 		return
 	}
-	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.Name}); err != nil {
+	if err := conn.WriteMessage(&protocol.OK{}); err != nil {
 		slog.Debug("write ok response", "err", err)
 	}
 }
@@ -418,7 +540,7 @@ func (s *Server) handleSendKey(conn *protocol.Conn, msg *protocol.SendKey) {
 	s.mu.RUnlock()
 
 	if !ok {
-		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+		if err := conn.WriteMessage(&protocol.Error{Message: "session not found"}); err != nil {
 			slog.Debug("write error response", "err", err)
 		}
 		return
@@ -426,7 +548,7 @@ func (s *Server) handleSendKey(conn *protocol.Conn, msg *protocol.SendKey) {
 
 	data, err := sess.term.EncodeKey(s.ctx, libghostty.KeyCode(msg.KeyCode), libghostty.Modifier(msg.Mods))
 	if err != nil {
-		if werr := conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()}); werr != nil {
+		if werr := conn.WriteMessage(&protocol.Error{Message: err.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
 		}
 		return
@@ -434,14 +556,14 @@ func (s *Server) handleSendKey(conn *protocol.Conn, msg *protocol.SendKey) {
 
 	if len(data) > 0 {
 		if err := sess.sendInput(data); err != nil {
-			if werr := conn.WriteMessage(&protocol.Error{Code: 4, Message: err.Error()}); werr != nil {
+			if werr := conn.WriteMessage(&protocol.Error{Message: err.Error()}); werr != nil {
 				slog.Debug("write error response", "err", werr)
 			}
 			return
 		}
 	}
 
-	if err := conn.WriteMessage(&protocol.OK{SessionName: msg.Name}); err != nil {
+	if err := conn.WriteMessage(&protocol.OK{}); err != nil {
 		slog.Debug("write ok response", "err", err)
 	}
 }
@@ -452,7 +574,7 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	s.mu.RUnlock()
 
 	if !ok {
-		if err := conn.WriteMessage(&protocol.Error{Code: 3, Message: "session not found"}); err != nil {
+		if err := conn.WriteMessage(&protocol.Error{Message: "session not found"}); err != nil {
 			slog.Debug("write error response", "err", err)
 		}
 		return
@@ -473,7 +595,7 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 
 	dump, err := sess.dumpScreen(s.ctx, wasmFmt)
 	if err != nil {
-		if werr := conn.WriteMessage(&protocol.Error{Code: 5, Message: err.Error()}); werr != nil {
+		if werr := conn.WriteMessage(&protocol.Error{Message: err.Error()}); werr != nil {
 			slog.Debug("write error response", "err", werr)
 		}
 		return
@@ -563,23 +685,21 @@ func (s *Server) statusSnapshot(sessionName string) (map[string]bool, uint32, ui
 	}
 
 	sess.clientMu.Lock()
-	clientCount := uint32(len(sess.clients))
-	clientVersions := make([]string, 0, len(sess.clients))
+	clients := make([]protocol.ClientInfo, 0, len(sess.clients))
 	for _, ac := range sess.clients {
-		clientVersions = append(clientVersions, ac.version)
+		clients = append(clients, protocol.ClientInfo{ClientID: ac.id, TTY: ac.tty, ReadOnly: ac.readOnly, Version: ac.version})
 	}
 	sess.clientMu.Unlock()
 
 	cols, rows := sess.size()
 	ss := &protocol.SessionStatus{
-		Name:           sess.Name,
-		State:          state,
-		Cols:           cols,
-		Rows:           rows,
-		PID:            sess.PID,
-		CWD:            sess.term.GetPwd(ctx),
-		ClientCount:    clientCount,
-		ClientVersions: clientVersions,
+		Name:    sess.Name,
+		State:   state,
+		Cols:    cols,
+		Rows:    rows,
+		PID:     sess.PID,
+		CWD:     sess.term.GetPwd(ctx),
+		Clients: clients,
 	}
 	return running, runningCount, deadCount, ss
 }
@@ -601,6 +721,17 @@ func (s *Server) shutdown() {
 	}
 
 	s.mu.Lock()
+	for _, t := range s.deadTimers {
+		t.Stop()
+	}
+	s.deadTimers = make(map[string]*time.Timer)
+	s.deadTimerAt = make(map[string]time.Time)
+	for _, lease := range s.attachLeases {
+		if lease.timer != nil {
+			lease.timer.Stop()
+		}
+	}
+	s.attachLeases = make(map[string]*attachLease)
 	for _, sess := range s.sessions {
 		sess.close(context.Background())
 	}

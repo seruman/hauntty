@@ -46,49 +46,61 @@ func (c *Client) Close() error {
 	return c.netConn.Close()
 }
 
-func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command []string, env []string, scrollback uint32, cwd string, readOnly bool) (*protocol.OK, *protocol.State, error) {
-	err := c.conn.WriteMessage(&protocol.Attach{
-		Name:            name,
-		Cols:            cols,
-		Rows:            rows,
-		Xpixel:          xpixel,
-		Ypixel:          ypixel,
-		Command:         command,
-		Env:             env,
-		ScrollbackLines: scrollback,
-		CWD:             cwd,
-		ReadOnly:        readOnly,
+func (c *Client) Create(name string, command []string, env []string, cwd string, mode protocol.CreateMode) (*protocol.Created, error) {
+	err := c.conn.WriteMessage(&protocol.Create{
+		Name:    name,
+		Command: command,
+		Env:     env,
+		CWD:     cwd,
+		Mode:    mode,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("send attach: %w", err)
+		return nil, fmt.Errorf("send create: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
 	if err != nil {
-		return nil, nil, fmt.Errorf("read attach response: %w", err)
+		return nil, fmt.Errorf("read create response: %w", err)
 	}
-	var ok *protocol.OK
 	switch m := msg.(type) {
-	case *protocol.OK:
-		ok = m
+	case *protocol.Created:
+		return m, nil
 	case *protocol.Error:
-		return nil, nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, fmt.Errorf("%s", m.Message)
 	default:
-		return nil, nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
-
-	msg, err = c.conn.ReadMessage()
-	if err != nil {
-		return ok, nil, fmt.Errorf("read state: %w", err)
-	}
-	state, ok2 := msg.(*protocol.State)
-	if !ok2 {
-		return ok, nil, fmt.Errorf("expected state message, got 0x%02x", msg.Type())
-	}
-	return ok, state, nil
 }
 
-func (c *Client) List() (*protocol.Sessions, error) {
-	if err := c.conn.WriteMessage(&protocol.List{}); err != nil {
+func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, readOnly bool, clientTTY string, attachToken string) (*protocol.Attached, error) {
+	err := c.conn.WriteMessage(&protocol.Attach{
+		Name:        name,
+		Cols:        cols,
+		Rows:        rows,
+		Xpixel:      xpixel,
+		Ypixel:      ypixel,
+		ReadOnly:    readOnly,
+		ClientTTY:   clientTTY,
+		AttachToken: attachToken,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("send attach: %w", err)
+	}
+	msg, err := c.conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("read attach response: %w", err)
+	}
+	switch m := msg.(type) {
+	case *protocol.Attached:
+		return m, nil
+	case *protocol.Error:
+		return nil, fmt.Errorf("%s", m.Message)
+	default:
+		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+	}
+}
+
+func (c *Client) List(includeClients bool) (*protocol.Sessions, error) {
+	if err := c.conn.WriteMessage(&protocol.List{IncludeClients: includeClients}); err != nil {
 		return nil, fmt.Errorf("send list: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
@@ -99,7 +111,7 @@ func (c *Client) List() (*protocol.Sessions, error) {
 	case *protocol.Sessions:
 		return m, nil
 	case *protocol.Error:
-		return nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, fmt.Errorf("%s", m.Message)
 	default:
 		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -117,7 +129,7 @@ func (c *Client) Kill(name string) error {
 	case *protocol.OK:
 		return nil
 	case *protocol.Error:
-		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return fmt.Errorf("%s", m.Message)
 	default:
 		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -135,7 +147,7 @@ func (c *Client) Send(name string, data []byte) error {
 	case *protocol.OK:
 		return nil
 	case *protocol.Error:
-		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return fmt.Errorf("%s", m.Message)
 	default:
 		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -153,7 +165,7 @@ func (c *Client) SendKey(name string, keyCode libghostty.KeyCode, mods libghostt
 	case *protocol.OK:
 		return nil
 	case *protocol.Error:
-		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return fmt.Errorf("%s", m.Message)
 	default:
 		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -171,7 +183,7 @@ func (c *Client) Dump(name string, format uint8) ([]byte, error) {
 	case *protocol.DumpResponse:
 		return m.Data, nil
 	case *protocol.Error:
-		return nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, fmt.Errorf("%s", m.Message)
 	default:
 		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -189,7 +201,7 @@ func (c *Client) Prune() (uint32, error) {
 	case *protocol.PruneResponse:
 		return m.Count, nil
 	case *protocol.Error:
-		return 0, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return 0, fmt.Errorf("%s", m.Message)
 	default:
 		return 0, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -207,7 +219,7 @@ func (c *Client) Status(sessionName string) (*protocol.StatusResponse, error) {
 	case *protocol.StatusResponse:
 		return m, nil
 	case *protocol.Error:
-		return nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, fmt.Errorf("%s", m.Message)
 	default:
 		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}

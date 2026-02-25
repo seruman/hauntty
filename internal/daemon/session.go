@@ -23,6 +23,8 @@ var feedPool = sync.Pool{
 }
 
 type attachedClient struct {
+	id       string
+	tty      string
 	conn     *protocol.Conn
 	close    func() error
 	cols     uint16
@@ -270,29 +272,36 @@ func (s *Session) readLoop(ctx context.Context) {
 	}
 }
 
-func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string, readOnly bool) (*attachedClient, error) {
-	// Resize before dumping so the screen dump reflects the dimensions
-	// that will be in effect once this client is added.
-	// Read-only clients don't participate in resize arbitration.
-	if !readOnly {
+func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string, readOnly bool, tty string, clientID string) (*protocol.Attached, *attachedClient, error) {
+	if s.isRunning() && !readOnly {
 		s.resizeForPendingClient(ctx, cols, rows, xpixel, ypixel)
 	}
 
 	dump, err := s.term.DumpScreen(ctx, libghostty.DumpVTFull)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	err = conn.WriteMessage(&protocol.State{
+
+	currentCols, currentRows := s.size()
+	attached := &protocol.Attached{
+		SessionName:       s.Name,
+		Cols:              currentCols,
+		Rows:              currentRows,
+		PID:               s.PID,
+		ClientID:          clientID,
 		ScreenDump:        dump.VT,
 		CursorRow:         dump.CursorRow,
 		CursorCol:         dump.CursorCol,
 		IsAlternateScreen: dump.IsAltScreen,
-	})
-	if err != nil {
-		return nil, err
+	}
+
+	if !s.isRunning() {
+		return attached, nil, nil
 	}
 
 	ac := &attachedClient{
+		id:       clientID,
+		tty:      tty,
 		conn:     conn,
 		close:    closeConn,
 		cols:     cols,
@@ -311,7 +320,7 @@ func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn fun
 		s.arbitrateResize()
 	}
 
-	return ac, nil
+	return attached, ac, nil
 }
 
 // detachClient removes a specific client without closing its net.Conn.
@@ -322,7 +331,7 @@ func (s *Session) detachClient(ac *attachedClient) {
 	s.arbitrateResize()
 }
 
-func (s *Session) disconnectActiveClient() {
+func (s *Session) disconnectActiveClient() bool {
 	s.clientMu.Lock()
 	ac := s.activeClient
 	if ac == nil && len(s.clients) == 1 {
@@ -330,13 +339,56 @@ func (s *Session) disconnectActiveClient() {
 	}
 	s.clientMu.Unlock()
 	if ac == nil {
-		return
+		return false
 	}
 	if !s.removeClient(ac) {
-		return
+		return false
 	}
 	s.arbitrateResize()
 	_ = ac.close()
+	return true
+}
+
+func (s *Session) disconnectClientByID(id string) bool {
+	s.clientMu.Lock()
+	var ac *attachedClient
+	for _, c := range s.clients {
+		if c.id == id {
+			ac = c
+			break
+		}
+	}
+	s.clientMu.Unlock()
+	if ac == nil {
+		return false
+	}
+	if !s.removeClient(ac) {
+		return false
+	}
+	s.arbitrateResize()
+	_ = ac.close()
+	return true
+}
+
+func (s *Session) disconnectClientByTTY(tty string) bool {
+	s.clientMu.Lock()
+	var ac *attachedClient
+	for _, c := range s.clients {
+		if c.tty == tty {
+			ac = c
+			break
+		}
+	}
+	s.clientMu.Unlock()
+	if ac == nil {
+		return false
+	}
+	if !s.removeClient(ac) {
+		return false
+	}
+	s.arbitrateResize()
+	_ = ac.close()
+	return true
 }
 
 // disconnectAllClients removes all clients and closes their connections.
@@ -358,7 +410,7 @@ func (s *Session) addClient(ac *attachedClient) {
 	s.clients = append(s.clients, ac)
 	count := uint16(len(s.clients))
 	s.clientMu.Unlock()
-	s.broadcastClientsChanged(count)
+	s.broadcastClientsChanged(count, ac)
 }
 
 func (s *Session) removeClient(ac *attachedClient) bool {
@@ -381,7 +433,7 @@ func (s *Session) removeClient(ac *attachedClient) bool {
 	}
 	close(ac.outCh)
 	<-ac.done
-	s.broadcastClientsChanged(count)
+	s.broadcastClientsChanged(count, nil)
 	return true
 }
 
@@ -415,7 +467,7 @@ func (s *Session) broadcastOutput(data []byte) {
 	}
 }
 
-func (s *Session) broadcastClientsChanged(count uint16) {
+func (s *Session) broadcastClientsChanged(count uint16, skip *attachedClient) {
 	cols, rows := s.size()
 	msg := &protocol.ClientsChanged{
 		Count: count,
@@ -428,6 +480,9 @@ func (s *Session) broadcastClientsChanged(count uint16) {
 	s.clientMu.Unlock()
 
 	for _, ac := range clients {
+		if skip != nil && ac == skip {
+			continue
+		}
 		_ = ac.conn.WriteMessage(msg)
 	}
 }

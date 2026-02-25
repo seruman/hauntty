@@ -13,6 +13,7 @@ func TestDefaults(t *testing.T) {
 	assert.Equal(t, cfg.Daemon.DefaultScrollback, uint32(10000))
 	assert.Equal(t, cfg.Daemon.StatePersistence, true)
 	assert.Equal(t, cfg.Daemon.StatePersistenceInterval, 30)
+	assert.Equal(t, cfg.Daemon.DeadSessionTTLSeconds, 3)
 	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+;")
 	assert.Equal(t, cfg.Session.DefaultCommand, "")
 	assert.DeepEqual(t, cfg.Client.ForwardEnv, []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"})
@@ -47,6 +48,7 @@ func TestLoadOverrides(t *testing.T) {
 	err := os.WriteFile(path, []byte(`[daemon]
 default_scrollback = 5000
 auto_exit = true
+dead_session_ttl_seconds = 9
 
 [client]
 detach_keybind = "ctrl+q"
@@ -61,6 +63,7 @@ default_command = "/usr/bin/fish"
 	assert.NilError(t, err)
 	assert.Equal(t, cfg.Daemon.DefaultScrollback, uint32(5000))
 	assert.Equal(t, cfg.Daemon.AutoExit, true)
+	assert.Equal(t, cfg.Daemon.DeadSessionTTLSeconds, 9)
 	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+q")
 	assert.DeepEqual(t, cfg.Client.ForwardEnv, []string{"TERM"})
 	assert.Equal(t, cfg.Session.DefaultCommand, "/usr/bin/fish")

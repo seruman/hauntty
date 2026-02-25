@@ -21,6 +21,7 @@ type DaemonConfig struct {
 	DefaultScrollback        uint32 `toml:"default_scrollback"`
 	StatePersistence         bool   `toml:"state_persistence"`
 	StatePersistenceInterval int    `toml:"state_persistence_interval"`
+	DeadSessionTTLSeconds    int    `toml:"dead_session_ttl_seconds"`
 }
 
 type ClientConfig struct {
@@ -39,6 +40,7 @@ func Default() *Config {
 			DefaultScrollback:        10000,
 			StatePersistence:         true,
 			StatePersistenceInterval: 30,
+			DeadSessionTTLSeconds:    3,
 		},
 		Client: ClientConfig{
 			// TODO: ctrl+; requires kitty keyboard protocol, consider ctrl+]

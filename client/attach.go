@@ -68,17 +68,22 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 
 	cwd, _ := os.Getwd()
 
-	ok, state, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd, readOnly)
+	created, err := c.Create(name, command, env, cwd, protocol.CreateModeOpenOrCreate)
 	if err != nil {
 		return err
 	}
 
-	if ok.Created {
-		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", ok.SessionName, ok.PID)
+	attached, err := c.Attach(created.SessionName, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, readOnly, currentTTY(), created.AttachToken)
+	if err != nil {
+		return err
+	}
+
+	if created.Outcome == protocol.CreateOutcomeCreated {
+		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", attached.SessionName, attached.PID)
 	} else if readOnly {
-		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", ok.SessionName, ok.PID)
+		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", attached.SessionName, attached.PID)
 	} else {
-		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", ok.SessionName, ok.PID)
+		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", attached.SessionName, attached.PID)
 	}
 
 	// Push kitty keyboard level to isolate inner session keyboard
@@ -87,7 +92,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		return fmt.Errorf("push kitty keyboard: %w", err)
 	}
 
-	if !ok.Created && len(state.ScreenDump) > 0 {
+	if created.Outcome != protocol.CreateOutcomeCreated && len(attached.ScreenDump) > 0 {
 		// Reattach: preserve visible content in scrollback, then
 		// clear for the dump. Query cursor row via DSR so we
 		// scroll exactly the content-bearing rows — no blank
@@ -109,7 +114,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		clear.WriteString("\x1b[H")
 		os.Stdout.Write(clear.Bytes())
 
-		if _, err := os.Stdout.Write(state.ScreenDump); err != nil {
+		if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
 			return fmt.Errorf("write state dump: %w", err)
 		}
 	}
@@ -247,6 +252,16 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			return err
 		}
 	}
+}
+
+func currentTTY() string {
+	if tty := os.Getenv("TTY"); tty != "" {
+		return tty
+	}
+	if tty := os.Getenv("SSH_TTY"); tty != "" {
+		return tty
+	}
+	return ""
 }
 
 // readCursorRow reads the DSR response (\x1b[{row};{col}R) from fd

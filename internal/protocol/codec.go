@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	ProtocolVersion uint8  = 6
+	ProtocolVersion uint8  = 7
 	maxFrameSize    uint32 = 16 << 20 // 16MB
 )
 
@@ -120,6 +120,8 @@ func (c *Conn) AcceptVersion(version uint8, revision string) error {
 
 func newMessage(t uint8) (Message, error) {
 	switch t {
+	case TypeCreate:
+		return &Create{}, nil
 	case TypeAttach:
 		return &Attach{}, nil
 	case TypeInput:
@@ -148,8 +150,8 @@ func newMessage(t uint8) (Message, error) {
 		return &Error{}, nil
 	case TypeOutput:
 		return &Output{}, nil
-	case TypeState:
-		return &State{}, nil
+	case TypeCreated:
+		return &Created{}, nil
 	case TypeSessions:
 		return &Sessions{}, nil
 	case TypeExited:
@@ -162,6 +164,8 @@ func newMessage(t uint8) (Message, error) {
 		return &ClientsChanged{}, nil
 	case TypeStatusResponse:
 		return &StatusResponse{}, nil
+	case TypeAttached:
+		return &Attached{}, nil
 	default:
 		return nil, fmt.Errorf("unknown message type: 0x%02x", t)
 	}

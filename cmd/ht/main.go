@@ -45,11 +45,6 @@ type CLI struct {
 	Complete   CompleteCmd      `cmd:"" hidden:"" name:"__complete" help:"Internal completion data provider."`
 }
 
-const (
-	headlessCols = 120
-	headlessRows = 30
-)
-
 type AttachCmd struct {
 	Name     string   `arg:"" optional:"" help:"Session name."`
 	Command  []string `arg:"" optional:"" help:"Command to run."`
@@ -107,16 +102,13 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 
-	ok, _, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Client.ForwardEnv), 10000, cwd, false)
+	created, err := c.Create(cmd.Name, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Client.ForwardEnv), cwd, protocol.CreateModeRequireNew)
 	if err != nil {
 		return err
 	}
 
-	if ok.Created {
-		fmt.Printf("created session %q\n", ok.SessionName)
-		return nil
-	}
-	return fmt.Errorf("session %q already exists", ok.SessionName)
+	fmt.Printf("created session %q\n", created.SessionName)
+	return nil
 }
 
 type ListCmd struct {
@@ -130,7 +122,7 @@ func (cmd *ListCmd) Run(cfg *config.Config) error {
 	}
 	defer c.Close()
 
-	sessions, err := c.List()
+	sessions, err := c.List(false)
 	if err != nil {
 		return err
 	}
@@ -315,9 +307,13 @@ func (cmd *StatusCmd) Run(cfg *config.Config) error {
 		fmt.Printf("size:     %dx%d\n", s.Cols, s.Rows)
 		fmt.Printf("cwd:      %s\n", cwd)
 		fmt.Printf("pid:      %d\n", s.PID)
-		fmt.Printf("clients:  %d\n", s.ClientCount)
-		for i, v := range s.ClientVersions {
-			fmt.Printf("  [%d]:    %s\n", i, v)
+		fmt.Printf("clients:  %d\n", len(s.Clients))
+		for i, cl := range s.Clients {
+			mode := "rw"
+			if cl.ReadOnly {
+				mode = "ro"
+			}
+			fmt.Printf("  [%d]:    id=%s tty=%s mode=%s version=%s\n", i, cl.ClientID, cl.TTY, mode, cl.Version)
 		}
 	}
 
@@ -478,7 +474,7 @@ func (cmd *CompleteCmd) Run(cfg *config.Config) error {
 		}
 		defer c.Close()
 
-		sessions, err := c.List()
+		sessions, err := c.List(false)
 		if err != nil {
 			return nil
 		}
