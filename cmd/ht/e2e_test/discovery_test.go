@@ -2,8 +2,10 @@ package e2e_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
+	"gotest.tools/v3/assert"
 	"gotest.tools/v3/icmd"
 
 	"code.selman.me/hauntty/internal/config"
@@ -32,11 +34,18 @@ func TestListSessionsFiltering(t *testing.T) {
 	oneshootShell.Type("$HT_BIN attach dead -- /bin/sh -c \"exit 0\"\n")
 	oneshootShell.WaitFor("created session")
 
+	// Partial assertions (Contains) are used here because list output
+	// includes dynamic columns (PID, timestamp, CWD) with tabwriter
+	// padding that make exact matching impractical.
 	list := e.run("list")
 	list.Assert(t, icmd.Expected{ExitCode: 0})
+	assert.Assert(t, strings.Contains(list.Stdout(), "alive"), "list should contain alive session, got: %s", list.Stdout())
+	assert.Assert(t, !strings.Contains(list.Stdout(), "dead"), "list should not contain dead session, got: %s", list.Stdout())
 
 	listAll := e.run("list", "-a")
 	listAll.Assert(t, icmd.Expected{ExitCode: 0})
+	assert.Assert(t, strings.Contains(listAll.Stdout(), "alive"), "list -a should contain alive session, got: %s", listAll.Stdout())
+	assert.Assert(t, strings.Contains(listAll.Stdout(), "dead"), "list -a should contain dead session, got: %s", listAll.Stdout())
 }
 
 func TestStatusSessionContext(t *testing.T) {
@@ -59,16 +68,6 @@ func TestStatusSessionContext(t *testing.T) {
 	sh.WaitFor("session:  status-session")
 	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
-}
-
-func TestDetachOutsideSession(t *testing.T) {
-	e := setup(t, nil)
-
-	result := e.run("detach")
-	result.Assert(t, icmd.Expected{
-		ExitCode: 1,
-		Err:      "ht: error: not inside a hauntty session\n",
-	})
 }
 
 func TestAttachInsideSession(t *testing.T) {
