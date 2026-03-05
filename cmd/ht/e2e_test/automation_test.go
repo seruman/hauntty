@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"testing"
+	"time"
 
 	"gotest.tools/v3/golden"
 	"gotest.tools/v3/icmd"
@@ -144,4 +145,66 @@ func TestDumpFormats(t *testing.T) {
 	html := e.run("dump", "dump-formats", "--format", "html")
 	html.Assert(t, icmd.Success)
 	golden.Assert(t, html.Stdout(), "dump_html.golden")
+}
+
+func TestDumpDeadSessionPreservesFormats(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon"})
+	daemon.WaitFor("daemon listening")
+
+	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh)
+	sh.Type("$HT_BIN attach dead-dump-formats -- /bin/sh -c \"printf '\\033[31mred\\033[0m\\nplain\\n'; sleep 30\"\n")
+	sh.WaitFor("red")
+	sh.WaitFor("plain")
+	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.WaitFor("detached")
+	e.waitHostPrompt(sh)
+
+	kill := e.run("kill", "dead-dump-formats")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"dead-dump-formats\"\n"})
+	time.Sleep(500 * time.Millisecond)
+
+	deadPlain := e.run("dump", "dead-dump-formats", "--format", "plain")
+	deadPlain.Assert(t, icmd.Success)
+	golden.Assert(t, deadPlain.Stdout(), "dump_dead_plain.golden")
+
+	deadHTML := e.run("dump", "dead-dump-formats", "--format", "html")
+	deadHTML.Assert(t, icmd.Success)
+	golden.Assert(t, deadHTML.Stdout(), "dump_dead_html.golden")
+}
+
+func TestDumpDeadSessionPreservesJoinFlag(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon"})
+	daemon.WaitFor("daemon listening")
+
+	sh := e.term(
+		[]string{"/bin/sh"},
+		termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"),
+		termtest.WithSize(20, 24),
+	)
+	e.waitHostPrompt(sh)
+	sh.Type("$HT_BIN attach dead-dump-join -- /bin/sh -c \"printf 'aaaaaaaaaaaaaaaaaaaabbbbbbbbbb\\n'; sleep 30\"\n")
+	sh.WaitFor("bbbb")
+	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	e.waitHostPrompt(sh)
+
+	kill := e.run("kill", "dead-dump-join")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"dead-dump-join\"\n"})
+	time.Sleep(500 * time.Millisecond)
+
+	deadPlain := e.run("dump", "dead-dump-join", "--format", "plain")
+	deadPlain.Assert(t, icmd.Success)
+	golden.Assert(t, deadPlain.Stdout(), "dump_dead_wrap_plain.golden")
+
+	deadJoin := e.run("dump", "dead-dump-join", "--format", "plain", "-J")
+	deadJoin.Assert(t, icmd.Success)
+	golden.Assert(t, deadJoin.Stdout(), "dump_dead_wrap_join.golden")
 }

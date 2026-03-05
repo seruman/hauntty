@@ -355,16 +355,19 @@ func TestRestoreDeadSession(t *testing.T) {
 	dump := e.run("dump", "restore-me")
 	dump.Assert(t, icmd.Expected{ExitCode: 0})
 
-	sh.Type("$HT_BIN restore restore-me\n")
-	sh.WaitFor("restore-marker")
-	e.waitAttachedPrompt(sh)
+	restoreSh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(restoreSh)
+	restoreSh.Type("$HT_BIN restore restore-me\n")
+	restoreSh.WaitFor("attached to session")
+	restoreSh.WaitFor("restore-marker")
+	e.waitAttachedPrompt(restoreSh)
 
-	sh.Type("echo restored-ok\n")
-	sh.WaitFor("restored-ok")
+	restoreSh.Type("echo restored-ok\n")
+	restoreSh.WaitFor("restored-ok")
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
-	sh.WaitFor("detached")
-	e.waitHostPrompt(sh)
+	restoreSh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	restoreSh.WaitFor("detached")
+	e.waitHostPrompt(restoreSh)
 }
 
 func TestRestoreRunningSessionFails(t *testing.T) {

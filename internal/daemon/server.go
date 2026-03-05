@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -416,8 +417,6 @@ func (s *Server) handleAttachRestore(conn *protocol.Conn, closeConn func() error
 		return nil, nil, false, err
 	}
 
-	CleanState(name)
-
 	s.mu.Lock()
 	if _, exists := s.sessions[name]; exists {
 		s.mu.Unlock()
@@ -430,7 +429,7 @@ func (s *Server) handleAttachRestore(conn *protocol.Conn, closeConn func() error
 
 	s.watchSession(sess)
 
-	ac, err := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, clientRev, msg.ReadOnly, true)
+	ac, err := sess.attach(s.ctx, conn, closeConn, msg.Cols, msg.Rows, msg.Xpixel, msg.Ypixel, clientRev, msg.ReadOnly, false)
 	if err != nil {
 		s.mu.Lock()
 		delete(s.sessions, name)
@@ -438,6 +437,10 @@ func (s *Server) handleAttachRestore(conn *protocol.Conn, closeConn func() error
 		sess.close(s.ctx)
 		writeError(conn, err.Error())
 		return nil, nil, false, err
+	}
+
+	if err := CleanState(name); err != nil {
+		slog.Warn("clean restored state", "session", name, "err", err)
 	}
 
 	return sess, ac, msg.ReadOnly, nil
@@ -592,19 +595,7 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	s.mu.RUnlock()
 
 	if ok {
-		flags := libghostty.DumpFormat(msg.Format) & ^libghostty.DumpFormatMask
-		var wasmFmt libghostty.DumpFormat
-		switch msg.Format & protocol.DumpFormatMask {
-		case protocol.DumpVT:
-			wasmFmt = libghostty.DumpVTSafe
-		case protocol.DumpHTML:
-			wasmFmt = libghostty.DumpHTML
-		default:
-			wasmFmt = libghostty.DumpPlain
-		}
-		wasmFmt |= flags
-
-		dump, err := sess.dumpScreen(s.ctx, wasmFmt)
+		dump, err := sess.dumpScreen(s.ctx, dumpFormat(msg.Format))
 		if err != nil {
 			writeError(conn, err.Error())
 			return
@@ -615,15 +606,55 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 		return
 	}
 
-	// Fall back to disk state for dead sessions.
 	if state, err := LoadState(msg.Name); err == nil {
-		if err := conn.WriteMessage(&protocol.DumpResponse{Data: state.VT}); err != nil {
+		data, err := dumpDeadState(s.ctx, s.wasmRT, state, s.defaultScrollback, msg.Format)
+		if err != nil {
+			writeError(conn, err.Error())
+			return
+		}
+		if err := conn.WriteMessage(&protocol.DumpResponse{Data: data}); err != nil {
 			slog.Debug("write dump response", "err", err)
 		}
 		return
 	}
 
 	writeError(conn, "session not found")
+}
+
+func dumpFormat(format uint8) libghostty.DumpFormat {
+	flags := libghostty.DumpFormat(format) & ^libghostty.DumpFormatMask
+	var wasmFmt libghostty.DumpFormat
+	switch format & protocol.DumpFormatMask {
+	case protocol.DumpVT:
+		wasmFmt = libghostty.DumpVTSafe
+	case protocol.DumpHTML:
+		wasmFmt = libghostty.DumpHTML
+	default:
+		wasmFmt = libghostty.DumpPlain
+	}
+	return wasmFmt | flags
+}
+
+func dumpDeadState(ctx context.Context, rt *libghostty.Runtime, state *SessionState, scrollback uint32, format uint8) ([]byte, error) {
+	scrollback = max(scrollback, uint32(bytes.Count(state.VT, []byte{'\n'}))+uint32(state.Rows)+1)
+
+	term, err := rt.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
+	if err != nil {
+		return nil, fmt.Errorf("dump dead state: new terminal: %w", err)
+	}
+	defer term.Close(ctx)
+
+	if len(state.VT) > 0 {
+		if err := term.Feed(ctx, state.VT); err != nil {
+			return nil, fmt.Errorf("dump dead state: feed vt: %w", err)
+		}
+	}
+
+	dump, err := term.DumpScreen(ctx, dumpFormat(format))
+	if err != nil {
+		return nil, fmt.Errorf("dump dead state: dump screen: %w", err)
+	}
+	return dump.VT, nil
 }
 
 func (s *Server) handlePrune(conn *protocol.Conn) {
