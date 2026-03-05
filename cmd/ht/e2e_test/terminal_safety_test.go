@@ -340,3 +340,84 @@ func TestDetachHostResize(t *testing.T) {
 	sh.Type("echo resize-ok\n")
 	sh.WaitFor("resize-ok")
 }
+
+func TestReadonlyClientStillDetachesAfterMasterDetach(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})
+	daemon.WaitFor("daemon listening")
+
+	master := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(master)
+	master.Type("$HT_BIN attach readonly-detach\n")
+	master.WaitFor("created session")
+	e.waitAttachedPrompt(master)
+
+	readonly := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(readonly)
+	readonly.Type("$HT_BIN attach -r readonly-detach\n")
+	readonly.WaitFor("attached read-only to session")
+	e.waitAttachedPrompt(readonly)
+
+	master.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	master.WaitFor("detached")
+	e.waitHostPrompt(master)
+
+	list := e.run("list")
+	list.Assert(t, icmd.Success)
+
+	readonly.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	readonly.WaitFor("detached")
+	e.waitHostPrompt(readonly)
+
+	kill := e.run("kill", "readonly-detach")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"readonly-detach\"\n"})
+
+	master.Type("echo master-host-ok\n")
+	master.WaitFor("master-host-ok")
+	readonly.Type("echo readonly-host-ok\n")
+	readonly.WaitFor("readonly-host-ok")
+}
+
+func TestReadonlyClientStillDetachesAfterMasterDetachDuringOutput(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})
+	daemon.WaitFor("daemon listening")
+
+	master := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(master)
+	master.Type("$HT_BIN attach readonly-busy\n")
+	master.WaitFor("created session")
+	e.waitAttachedPrompt(master)
+
+	readonly := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(readonly)
+	readonly.Type("$HT_BIN attach -r readonly-busy\n")
+	readonly.WaitFor("attached read-only to session")
+	e.waitAttachedPrompt(readonly)
+
+	master.Type("i=0; while :; do printf 'spam-%06d\\n' \"$i\"; i=$((i+1)); done &\n")
+	readonly.WaitFor("spam-")
+
+	master.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	master.WaitFor("detached")
+	e.waitHostPrompt(master)
+
+	listWhileBusy := e.run("list")
+	listWhileBusy.Assert(t, icmd.Success)
+
+	readonly.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	readonly.WaitFor("detached")
+	e.waitHostPrompt(readonly)
+
+	listNoClients := e.run("list")
+	listNoClients.Assert(t, icmd.Success)
+
+	kill := e.run("kill", "readonly-busy")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"readonly-busy\"\n"})
+}

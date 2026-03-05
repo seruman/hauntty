@@ -342,16 +342,26 @@ func (s *Session) run() {
 	var clients []*sessionClient
 	var nextClientID uint64
 
+	// pendingFeed holds data waiting to be sent to feedCh. While
+	// non-nil, we stop reading ptyOut (backpressure) but keep
+	// processing actions so detach/kick/list don't stall.
+	var pendingFeed *[]byte
+
 	for {
+		// Nil-channel trick: only one of ptyCh/feedSend is active
+		// at a time. When pendingFeed is nil, read ptyOut. When
+		// non-nil, send to feedCh. Actions are always processed.
+		var ptyCh <-chan []byte
+		var feedSend chan<- *[]byte
+		if pendingFeed != nil {
+			feedSend = s.feedCh
+		} else {
+			ptyCh = s.ptyOut
+		}
+
 		select {
-		case data, ok := <-s.ptyOut:
+		case data, ok := <-ptyCh:
 			if !ok {
-				// PTY exited. Enqueue Exited to all clients via outCh
-				// (preserving ordering: all Output before Exited) and
-				// close outCh so writeLoop drains and exits.
-				// If outCh is full (Exited dropped), close the conn to
-				// unblock handleConn's ReadMessage — otherwise let
-				// writeLoop deliver Exited normally.
 				close(s.feedCh)
 				exitMsg := &protocol.Exited{ExitCode: s.exitCode}
 				for _, c := range clients {
@@ -368,15 +378,21 @@ func (s *Session) run() {
 
 			// Broadcast output to all clients via outCh; evict slow ones.
 			msg := &protocol.Output{Data: data}
+			before := len(clients)
 			clients = broadcastOutput(clients, s.Name, msg)
-			notifyClientsChanged(clients, s.size)
+			if len(clients) != before {
+				notifyClientsChanged(clients, s.size)
+			}
 
-			// Feed WASM terminal.
+			// Stage for WASM feed — next iteration sends to feedCh.
 			bp := feedPool.Get().(*[]byte)
 			d := (*bp)[:len(data)]
 			copy(d, data)
 			*bp = d
-			s.feedCh <- bp
+			pendingFeed = bp
+
+		case feedSend <- pendingFeed:
+			pendingFeed = nil
 
 		case action := <-s.actions:
 			switch a := action.(type) {
@@ -484,6 +500,10 @@ func (s *Session) run() {
 				// Force-close: disconnect all clients, close feedCh, return.
 				// Clients see connection close (EOF), not Exited — this is
 				// the kill/shutdown path.
+				if pendingFeed != nil {
+					feedPool.Put(pendingFeed)
+					pendingFeed = nil
+				}
 				close(s.feedCh)
 				for _, c := range clients {
 					close(c.outCh)
