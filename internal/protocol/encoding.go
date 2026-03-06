@@ -69,6 +69,18 @@ func (e *Encoder) WriteString(v string) error {
 	return err
 }
 
+func (e *Encoder) WriteStringSlice(v []string) error {
+	if err := e.WriteU32(uint32(len(v))); err != nil {
+		return err
+	}
+	for _, s := range v {
+		if err := e.WriteString(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *Encoder) WriteBytes(v []byte) error {
 	if err := e.WriteU32(uint32(len(v))); err != nil {
 		return err
@@ -146,6 +158,23 @@ func (d *Decoder) ReadString() (string, error) {
 	return string(b), nil
 }
 
+func (d *Decoder) ReadStringSlice() ([]string, error) {
+	n, err := d.ReadU32()
+	if err != nil {
+		return nil, err
+	}
+	if n > maxFrameSize {
+		return nil, fmt.Errorf("string slice count %d exceeds maximum", n)
+	}
+	s := make([]string, n)
+	for i := range s {
+		if s[i], err = d.ReadString(); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
 func (d *Decoder) ReadBytes() ([]byte, error) {
 	n, err := d.ReadU32()
 	if err != nil {
@@ -153,6 +182,9 @@ func (d *Decoder) ReadBytes() ([]byte, error) {
 	}
 	if n == 0 {
 		return []byte{}, nil
+	}
+	if n > maxFrameSize {
+		return nil, fmt.Errorf("byte slice size %d exceeds maximum", n)
 	}
 	b := make([]byte, n)
 	if _, err := io.ReadFull(d.r, b); err != nil {

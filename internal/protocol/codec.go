@@ -4,15 +4,17 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 )
 
 const (
-	ProtocolVersion uint8  = 6
+	ProtocolVersion uint8  = 7
 	maxFrameSize    uint32 = 16 << 20 // 16MB
 )
 
 type Conn struct {
 	rw io.ReadWriter
+	wm sync.Mutex
 }
 
 func NewConn(rw io.ReadWriter) *Conn {
@@ -32,6 +34,10 @@ func (c *Conn) WriteMessage(msg Message) error {
 	}
 
 	frame := buf.Bytes()
+
+	c.wm.Lock()
+	defer c.wm.Unlock()
+
 	lenEnc := NewEncoder(c.rw)
 	if err := lenEnc.WriteU32(uint32(len(frame))); err != nil {
 		return err
@@ -76,6 +82,7 @@ func (c *Conn) ReadMessage() (Message, error) {
 	return msg, nil
 }
 
+// Call before any concurrent use of the connection.
 func (c *Conn) Handshake(version uint8, revision string) (uint8, string, error) {
 	enc := NewEncoder(c.rw)
 	if err := enc.WriteU8(version); err != nil {
@@ -96,7 +103,7 @@ func (c *Conn) Handshake(version uint8, revision string) (uint8, string, error) 
 	return serverVer, serverRev, nil
 }
 
-// Caller must check the version and call AcceptVersion or close.
+// Call before any concurrent use of the connection.
 func (c *Conn) AcceptHandshake() (uint8, string, error) {
 	dec := NewDecoder(c.rw)
 	version, err := dec.ReadU8()
@@ -110,6 +117,7 @@ func (c *Conn) AcceptHandshake() (uint8, string, error) {
 	return version, revision, nil
 }
 
+// Call before any concurrent use of the connection.
 func (c *Conn) AcceptVersion(version uint8, revision string) error {
 	enc := NewEncoder(c.rw)
 	if err := enc.WriteU8(version); err != nil {
@@ -140,16 +148,20 @@ func newMessage(t uint8) (Message, error) {
 		return &Prune{}, nil
 	case TypeSendKey:
 		return &SendKey{}, nil
+	case TypeCreate:
+		return &Create{}, nil
 	case TypeStatus:
 		return &Status{}, nil
+	case TypeKick:
+		return &Kick{}, nil
 	case TypeOK:
 		return &OK{}, nil
 	case TypeError:
 		return &Error{}, nil
 	case TypeOutput:
 		return &Output{}, nil
-	case TypeState:
-		return &State{}, nil
+	case TypeAttached:
+		return &Attached{}, nil
 	case TypeSessions:
 		return &Sessions{}, nil
 	case TypeExited:
@@ -162,6 +174,8 @@ func newMessage(t uint8) (Message, error) {
 		return &ClientsChanged{}, nil
 	case TypeStatusResponse:
 		return &StatusResponse{}, nil
+	case TypeCreated:
+		return &Created{}, nil
 	default:
 		return nil, fmt.Errorf("unknown message type: 0x%02x", t)
 	}

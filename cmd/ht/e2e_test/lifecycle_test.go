@@ -1,7 +1,6 @@
 package e2e_test
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -81,29 +80,23 @@ func TestReattachSessionContinuity(t *testing.T) {
 
 	sh.Type("echo marker-one\n")
 	sh.WaitFor("marker-one")
+	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
 
-	detachOne := icmd.RunCmd(
-		icmd.Command(htBin, "detach"),
-		icmd.WithEnv(append(os.Environ(), append(e.env(), "HAUNTTY_SESSION=continuity")...)...),
-	)
-	detachOne.Assert(t, icmd.Success)
+	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 
 	sh.Type("$HT_BIN attach continuity\n")
 	sh.WaitFor("IN>")
 	sh.WaitFor("marker-one")
+	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
 
-	detachTwo := icmd.RunCmd(
-		icmd.Command(htBin, "detach"),
-		icmd.WithEnv(append(os.Environ(), append(e.env(), "HAUNTTY_SESSION=continuity")...)...),
-	)
-	detachTwo.Assert(t, icmd.Success)
+	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 }
 
-func TestDetachInsideSessionDetachesSingleClient(t *testing.T) {
+func TestKeybindDetachWithMultipleClients(t *testing.T) {
 	cfg := config.Default()
 	cfg.Client.DetachKeybind = "ctrl+]"
 	e := setup(t, cfg)
@@ -123,7 +116,7 @@ func TestDetachInsideSessionDetachesSingleClient(t *testing.T) {
 	sh2.WaitFor("attached to session")
 	e.waitAttachedPrompt(sh2)
 
-	sh1.Type("$HT_BIN detach\n")
+	sh1.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
 	sh1.WaitFor("detached")
 	e.waitHostPrompt(sh1)
 
@@ -202,7 +195,7 @@ func TestNewCreatesSession(t *testing.T) {
 	e := setup(t, cfg)
 
 	created := e.run("new", "new-session")
-	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-session\"\n"})
+	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-session\""})
 
 	sendText := e.run("send", "new-session", "echo created-via-new")
 	sendText.Assert(t, icmd.Success)
@@ -222,7 +215,7 @@ func TestNewWithCommand(t *testing.T) {
 	e := setup(t, cfg)
 
 	created := e.run("new", "new-command", "--", "/bin/sh", "-c", "printf 'new-command-ok\\n'; sleep 30")
-	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-command\"\n"})
+	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-command\""})
 
 	wait := e.run("wait", "new-command", "new-command-ok", "-t", "5000")
 	wait.Assert(t, icmd.Success)
@@ -237,7 +230,7 @@ func TestNewExistingSession(t *testing.T) {
 	e := setup(t, cfg)
 
 	first := e.run("new", "new-existing")
-	first.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-existing\"\n"})
+	first.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"new-existing\""})
 
 	sendOne := e.run("send", "new-existing", "echo first-pass")
 	sendOne.Assert(t, icmd.Success)
@@ -247,7 +240,7 @@ func TestNewExistingSession(t *testing.T) {
 	waitOne.Assert(t, icmd.Success)
 
 	second := e.run("new", "new-existing")
-	second.Assert(t, icmd.Expected{ExitCode: 1, Err: "ht: error: session \"new-existing\" already exists\n"})
+	second.Assert(t, icmd.Expected{ExitCode: 1, Err: "create: session already exists"})
 
 	sendTwo := e.run("send", "new-existing", "echo second-pass")
 	sendTwo.Assert(t, icmd.Success)
@@ -258,4 +251,140 @@ func TestNewExistingSession(t *testing.T) {
 
 	kill := e.run("kill", "new-existing")
 	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"new-existing\"\n"})
+}
+
+func TestNewForceOverDeadState(t *testing.T) {
+	cfg := config.Default()
+	cfg.Daemon.AutoExit = true
+	cfg.Daemon.StatePersistence = true
+	e := setup(t, cfg)
+
+	created := e.run("new", "force-me", "--", "/bin/sh", "-c", "exit 0")
+	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"force-me\""})
+
+	time.Sleep(1 * time.Second)
+
+	second := e.run("new", "force-me")
+	second.Assert(t, icmd.Expected{ExitCode: 1, Err: "create: dead session state exists"})
+
+	forced := e.run("new", "force-me", "--force")
+	forced.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"force-me\""})
+
+	kill := e.run("kill", "force-me")
+	kill.Assert(t, icmd.Expected{ExitCode: 0})
+}
+
+func TestKickClient(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})
+	daemon.WaitFor("daemon listening")
+
+	sh1 := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh1)
+	sh1.Type("$HT_BIN attach kick-test\n")
+	sh1.WaitFor("created session")
+	e.waitAttachedPrompt(sh1)
+
+	sh2 := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh2)
+	sh2.Type("$HT_BIN attach kick-test\n")
+	sh2.WaitFor("attached to session")
+	e.waitAttachedPrompt(sh2)
+
+	kick := e.run("kick", "kick-test", "1")
+	kick.Assert(t, icmd.Expected{ExitCode: 0, Out: "kicked client 1 from session \"kick-test\"\n"})
+
+	e.waitHostPrompt(sh1)
+
+	sh2.Type("echo still-here\n")
+	sh2.WaitFor("still-here")
+
+	sh2.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh2.WaitFor("detached")
+	e.waitHostPrompt(sh2)
+}
+
+func TestKickNonexistent(t *testing.T) {
+	cfg := config.Default()
+	cfg.Daemon.AutoExit = true
+	e := setup(t, cfg)
+
+	created := e.run("new", "kick-miss")
+	created.Assert(t, icmd.Expected{ExitCode: 0})
+
+	kick := e.run("kick", "kick-miss", "999")
+	kick.Assert(t, icmd.Expected{ExitCode: 1, Err: "kick: client not found"})
+
+	kick2 := e.run("kick", "no-such-session", "1")
+	kick2.Assert(t, icmd.Expected{ExitCode: 1, Err: "kick: session not found"})
+
+	kill := e.run("kill", "kick-miss")
+	kill.Assert(t, icmd.Expected{ExitCode: 0})
+}
+
+func TestRestoreDeadSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	cfg.Daemon.StatePersistence = true
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon"})
+	daemon.WaitFor("daemon listening")
+
+	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh)
+	sh.Type("$HT_BIN attach restore-me\n")
+	sh.WaitFor("created session")
+	e.waitAttachedPrompt(sh)
+
+	sh.Type("echo restore-marker\n")
+	sh.WaitFor("restore-marker")
+	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
+
+	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.WaitFor("detached")
+	e.waitHostPrompt(sh)
+
+	kill := e.run("kill", "restore-me")
+	kill.Assert(t, icmd.Expected{ExitCode: 0})
+	time.Sleep(500 * time.Millisecond)
+
+	dump := e.run("dump", "restore-me")
+	dump.Assert(t, icmd.Expected{ExitCode: 0})
+
+	restoreSh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(restoreSh)
+	restoreSh.Type("$HT_BIN restore restore-me\n")
+	restoreSh.WaitFor("attached to session")
+	restoreSh.WaitFor("restore-marker")
+	e.waitAttachedPrompt(restoreSh)
+
+	restoreSh.Type("echo restored-ok\n")
+	restoreSh.WaitFor("restored-ok")
+
+	restoreSh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	restoreSh.WaitFor("detached")
+	e.waitHostPrompt(restoreSh)
+}
+
+func TestRestoreRunningSessionFails(t *testing.T) {
+	cfg := config.Default()
+	cfg.Daemon.AutoExit = true
+	cfg.Daemon.StatePersistence = true
+	e := setup(t, cfg)
+
+	created := e.run("new", "running")
+	created.Assert(t, icmd.Expected{ExitCode: 0})
+
+	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh)
+	sh.Type("$HT_BIN restore running\n")
+	sh.WaitFor("session is running")
+	e.waitHostPrompt(sh)
+
+	kill := e.run("kill", "running")
+	kill.Assert(t, icmd.Expected{ExitCode: 0})
 }

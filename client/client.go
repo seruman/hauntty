@@ -46,49 +46,65 @@ func (c *Client) Close() error {
 	return c.netConn.Close()
 }
 
-func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command []string, env []string, scrollback uint32, cwd string, readOnly bool) (*protocol.OK, *protocol.State, error) {
-	err := c.conn.WriteMessage(&protocol.Attach{
-		Name:            name,
-		Cols:            cols,
-		Rows:            rows,
-		Xpixel:          xpixel,
-		Ypixel:          ypixel,
-		Command:         command,
-		Env:             env,
-		ScrollbackLines: scrollback,
-		CWD:             cwd,
-		ReadOnly:        readOnly,
+func (c *Client) Create(name string, command, env []string, cwd string, scrollback uint32, force bool) (*protocol.Created, error) {
+	err := c.conn.WriteMessage(&protocol.Create{
+		Name:       name,
+		Command:    command,
+		Env:        env,
+		CWD:        cwd,
+		Scrollback: scrollback,
+		Force:      force,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("send attach: %w", err)
+		return nil, fmt.Errorf("send create: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
 	if err != nil {
-		return nil, nil, fmt.Errorf("read attach response: %w", err)
+		return nil, fmt.Errorf("read create response: %w", err)
 	}
-	var ok *protocol.OK
 	switch m := msg.(type) {
-	case *protocol.OK:
-		ok = m
+	case *protocol.Created:
+		return m, nil
 	case *protocol.Error:
-		return nil, nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, &ServerError{Op: "create", Message: m.Message}
 	default:
-		return nil, nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
-
-	msg, err = c.conn.ReadMessage()
-	if err != nil {
-		return ok, nil, fmt.Errorf("read state: %w", err)
-	}
-	state, ok2 := msg.(*protocol.State)
-	if !ok2 {
-		return ok, nil, fmt.Errorf("expected state message, got 0x%02x", msg.Type())
-	}
-	return ok, state, nil
 }
 
-func (c *Client) List() (*protocol.Sessions, error) {
-	if err := c.conn.WriteMessage(&protocol.List{}); err != nil {
+func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command, env []string, scrollback uint32, cwd string, readOnly, restore bool) (*protocol.Attached, error) {
+	err := c.conn.WriteMessage(&protocol.Attach{
+		Name:       name,
+		Command:    command,
+		Env:        env,
+		CWD:        cwd,
+		Cols:       cols,
+		Rows:       rows,
+		Xpixel:     xpixel,
+		Ypixel:     ypixel,
+		ReadOnly:   readOnly,
+		Restore:    restore,
+		Scrollback: scrollback,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("send attach: %w", err)
+	}
+	msg, err := c.conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("read attach response: %w", err)
+	}
+	switch m := msg.(type) {
+	case *protocol.Attached:
+		return m, nil
+	case *protocol.Error:
+		return nil, &ServerError{Op: "attach", Message: m.Message}
+	default:
+		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+	}
+}
+
+func (c *Client) List(includeClients bool) (*protocol.Sessions, error) {
+	if err := c.conn.WriteMessage(&protocol.List{IncludeClients: includeClients}); err != nil {
 		return nil, fmt.Errorf("send list: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
@@ -99,7 +115,7 @@ func (c *Client) List() (*protocol.Sessions, error) {
 	case *protocol.Sessions:
 		return m, nil
 	case *protocol.Error:
-		return nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, &ServerError{Op: "list", Message: m.Message}
 	default:
 		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -117,7 +133,7 @@ func (c *Client) Kill(name string) error {
 	case *protocol.OK:
 		return nil
 	case *protocol.Error:
-		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return &ServerError{Op: "kill", Message: m.Message}
 	default:
 		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -135,14 +151,14 @@ func (c *Client) Send(name string, data []byte) error {
 	case *protocol.OK:
 		return nil
 	case *protocol.Error:
-		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return &ServerError{Op: "send", Message: m.Message}
 	default:
 		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
 }
 
 func (c *Client) SendKey(name string, keyCode libghostty.KeyCode, mods libghostty.Modifier) error {
-	if err := c.conn.WriteMessage(&protocol.SendKey{Name: name, KeyCode: uint32(keyCode), Mods: uint32(mods)}); err != nil {
+	if err := c.conn.WriteMessage(&protocol.SendKey{Name: name, Key: uint32(keyCode), Mods: uint32(mods)}); err != nil {
 		return fmt.Errorf("send key: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
@@ -153,7 +169,7 @@ func (c *Client) SendKey(name string, keyCode libghostty.KeyCode, mods libghostt
 	case *protocol.OK:
 		return nil
 	case *protocol.Error:
-		return fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return &ServerError{Op: "send key", Message: m.Message}
 	default:
 		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -171,7 +187,7 @@ func (c *Client) Dump(name string, format uint8) ([]byte, error) {
 	case *protocol.DumpResponse:
 		return m.Data, nil
 	case *protocol.Error:
-		return nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, &ServerError{Op: "dump", Message: m.Message}
 	default:
 		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
@@ -189,14 +205,14 @@ func (c *Client) Prune() (uint32, error) {
 	case *protocol.PruneResponse:
 		return m.Count, nil
 	case *protocol.Error:
-		return 0, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return 0, &ServerError{Op: "prune", Message: m.Message}
 	default:
 		return 0, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
 }
 
-func (c *Client) Status(sessionName string) (*protocol.StatusResponse, error) {
-	if err := c.conn.WriteMessage(&protocol.Status{SessionName: sessionName}); err != nil {
+func (c *Client) Status(name string) (*protocol.StatusResponse, error) {
+	if err := c.conn.WriteMessage(&protocol.Status{Name: name}); err != nil {
 		return nil, fmt.Errorf("send status: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
@@ -207,16 +223,30 @@ func (c *Client) Status(sessionName string) (*protocol.StatusResponse, error) {
 	case *protocol.StatusResponse:
 		return m, nil
 	case *protocol.Error:
-		return nil, fmt.Errorf("server error (%d): %s", m.Code, m.Message)
+		return nil, &ServerError{Op: "status", Message: m.Message}
 	default:
 		return nil, fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
 	}
 }
 
-func (c *Client) Detach() error {
-	return c.conn.WriteMessage(&protocol.Detach{})
+func (c *Client) Kick(name, clientID string) error {
+	if err := c.conn.WriteMessage(&protocol.Kick{Name: name, ClientID: clientID}); err != nil {
+		return fmt.Errorf("send kick: %w", err)
+	}
+	msg, err := c.conn.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("read kick response: %w", err)
+	}
+	switch m := msg.(type) {
+	case *protocol.OK:
+		return nil
+	case *protocol.Error:
+		return &ServerError{Op: "kick", Message: m.Message}
+	default:
+		return fmt.Errorf("unexpected response type: 0x%02x", msg.Type())
+	}
 }
 
-func (c *Client) DetachSession(name string) error {
-	return c.conn.WriteMessage(&protocol.Detach{Name: name})
+func (c *Client) Detach() error {
+	return c.conn.WriteMessage(&protocol.Detach{})
 }

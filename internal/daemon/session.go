@@ -2,11 +2,13 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -22,47 +24,108 @@ var feedPool = sync.Pool{
 	},
 }
 
-type attachedClient struct {
-	conn     *protocol.Conn
-	close    func() error
-	cols     uint16
-	rows     uint16
-	xpixel   uint16
-	ypixel   uint16
-	version  string
-	readOnly bool
-	outCh    chan []byte
-	done     chan struct{}
+// All fields are owned exclusively by the session's run loop.
+type sessionClient struct {
+	id        string
+	conn      *protocol.Conn
+	closeConn func() error
+	cols      uint16
+	rows      uint16
+	xpixel    uint16
+	ypixel    uint16
+	version   string
+	readOnly  bool
+	outCh     chan protocol.Message
 }
 
-func (ac *attachedClient) writeLoop() {
-	for data := range ac.outCh {
-		if err := ac.conn.WriteMessage(&protocol.Output{Data: data}); err != nil {
+func (c *sessionClient) writeLoop() {
+	for msg := range c.outCh {
+		if err := c.conn.WriteMessage(msg); err != nil {
 			break
 		}
 	}
-	close(ac.done)
 }
+
+type attachReq struct {
+	conn      *protocol.Conn
+	closeConn func() error
+	cols      uint16
+	rows      uint16
+	xpixel    uint16
+	ypixel    uint16
+	version   string
+	readOnly  bool
+	created   bool
+	result    chan<- attachResp
+}
+
+type attachResp struct {
+	client *sessionClient
+	err    error
+}
+
+type detachReq struct {
+	client *sessionClient
+}
+
+type resizeReq struct {
+	client *sessionClient
+	cols   uint16
+	rows   uint16
+	xpixel uint16
+	ypixel uint16
+}
+
+type kickReq struct {
+	clientID string
+	result   chan<- bool
+}
+
+type clientInfoReq struct {
+	result chan<- []protocol.SessionClient
+}
+
+type stopReq struct{}
 
 type Session struct {
 	Name      string
-	Cols      uint16
-	Rows      uint16
 	PID       uint32
 	CreatedAt time.Time
 
-	mu           sync.Mutex
-	ptmx         *os.File
-	cmd          *exec.Cmd
-	term         *libghostty.Terminal
-	clients      []*attachedClient
-	activeClient *attachedClient
-	clientMu     sync.Mutex
-	feedCh       chan *[]byte
-	done         chan struct{}
-	exitCode     int32
-	tempDir      string
+	ptmx    *os.File
+	cmd     *exec.Cmd
+	term    *libghostty.Terminal
+	feedCh  chan *[]byte
+	tempDir string
+
+	actions chan any
+	ptyOut chan []byte
+	done chan struct{}
+	exitCode int32
+
+	// sizeVal packs cols|rows as (cols<<16)|rows for lock-free reads.
+	sizeVal atomic.Uint32
+
 	resizePolicy string
+	ctx          context.Context
+}
+
+func (s *Session) size() (uint16, uint16) {
+	v := s.sizeVal.Load()
+	return uint16(v >> 16), uint16(v)
+}
+
+func (s *Session) setSize(cols, rows uint16) {
+	s.sizeVal.Store(uint32(cols)<<16 | uint32(rows))
+}
+
+func (s *Session) isRunning() bool {
+	select {
+	case <-s.done:
+		return false
+	default:
+		return true
+	}
 }
 
 func resolveCommand(command []string, env []string) []string {
@@ -123,21 +186,24 @@ func newSession(ctx context.Context, name string, command []string, env []string
 
 	s := &Session{
 		Name:         name,
-		Cols:         cols,
-		Rows:         rows,
 		PID:          uint32(cmd.Process.Pid),
 		CreatedAt:    time.Now(),
 		ptmx:         ptmx,
 		cmd:          cmd,
 		term:         term,
 		feedCh:       make(chan *[]byte, 64),
-		done:         make(chan struct{}),
 		tempDir:      tempDir,
+		actions:      make(chan any, 16),
+		ptyOut:       make(chan []byte, 64),
+		done:         make(chan struct{}),
 		resizePolicy: resizePolicy,
+		ctx:          ctx,
 	}
+	s.setSize(cols, rows)
 
 	go s.feedLoop(ctx)
-	go s.readLoop(ctx)
+	go s.ptyRead()
+	go s.run()
 	return s, nil
 }
 
@@ -161,7 +227,6 @@ func restoreSession(ctx context.Context, name string, command []string, env []st
 			return nil, err
 		}
 	}
-	// DECSTR: clear modes left by the dead process.
 	if err := term.Feed(ctx, []byte("\x1b[!p")); err != nil {
 		term.Close(ctx)
 		return nil, err
@@ -200,21 +265,24 @@ func restoreSession(ctx context.Context, name string, command []string, env []st
 
 	s := &Session{
 		Name:         name,
-		Cols:         cols,
-		Rows:         rows,
 		PID:          uint32(cmd.Process.Pid),
 		CreatedAt:    time.Now(),
 		ptmx:         ptmx,
 		cmd:          cmd,
 		term:         term,
 		feedCh:       make(chan *[]byte, 64),
-		done:         make(chan struct{}),
 		tempDir:      tempDir,
+		actions:      make(chan any, 16),
+		ptyOut:       make(chan []byte, 64),
+		done:         make(chan struct{}),
 		resizePolicy: resizePolicy,
+		ctx:          ctx,
 	}
+	s.setSize(cols, rows)
 
 	go s.feedLoop(ctx)
-	go s.readLoop(ctx)
+	go s.ptyRead()
+	go s.run()
 	return s, nil
 }
 
@@ -228,222 +296,322 @@ func (s *Session) feedLoop(ctx context.Context) {
 	}
 }
 
-func (s *Session) readLoop(ctx context.Context) {
+func (s *Session) ptyRead() {
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := s.ptmx.Read(buf)
 		if n > 0 {
 			data := make([]byte, n)
 			copy(data, buf[:n])
-
-			s.clientMu.Lock()
-			s.broadcastOutput(data)
-			s.clientMu.Unlock()
-
-			bp := feedPool.Get().(*[]byte)
-			feedData := (*bp)[:n]
-			copy(feedData, buf[:n])
-			*bp = feedData
-			s.feedCh <- bp
+			select {
+			case s.ptyOut <- data:
+			case <-s.done:
+				return
+			}
 		}
 		if err != nil {
 			break
 		}
 	}
-	close(s.feedCh)
 
 	s.cmd.Wait()
 	if ws, ok := s.cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
 		s.exitCode = exitCodeFromWaitStatus(ws)
 	}
-	close(s.done)
-
-	exitMsg := &protocol.Exited{ExitCode: s.exitCode}
-	s.clientMu.Lock()
-	clients := s.clients
-	s.clients = nil
-	s.clientMu.Unlock()
-	for _, ac := range clients {
-		close(ac.outCh)
-		<-ac.done
-		ac.conn.WriteMessage(exitMsg)
-	}
+	close(s.ptyOut)
 }
 
-func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string, readOnly bool) (*attachedClient, error) {
-	// Resize before dumping so the screen dump reflects the dimensions
-	// that will be in effect once this client is added.
-	// Read-only clients don't participate in resize arbitration.
-	if !readOnly {
-		s.resizeForPendingClient(ctx, cols, rows, xpixel, ypixel)
-	}
+// run owns client state; connection writes go through per-client outCh.
+func (s *Session) run() {
+	defer close(s.done)
 
-	dump, err := s.term.DumpScreen(ctx, libghostty.DumpVTFull)
-	if err != nil {
-		return nil, err
-	}
-	err = conn.WriteMessage(&protocol.State{
-		ScreenDump:        dump.VT,
-		CursorRow:         dump.CursorRow,
-		CursorCol:         dump.CursorCol,
-		IsAlternateScreen: dump.IsAltScreen,
-	})
-	if err != nil {
-		return nil, err
-	}
+	var clients []*sessionClient
+	var nextClientID uint64
 
-	ac := &attachedClient{
-		conn:     conn,
-		close:    closeConn,
-		cols:     cols,
-		rows:     rows,
-		xpixel:   xpixel,
-		ypixel:   ypixel,
-		version:  version,
-		readOnly: readOnly,
-		outCh:    make(chan []byte, 64),
-		done:     make(chan struct{}),
-	}
-	go ac.writeLoop()
+	// pendingFeed holds data waiting to be sent to feedCh. While
+	// non-nil, we stop reading ptyOut (backpressure) but keep
+	// processing actions so detach/kick/list don't stall.
+	var pendingFeed *[]byte
 
-	s.addClient(ac)
-	if !readOnly {
-		s.arbitrateResize()
-	}
-
-	return ac, nil
-}
-
-// detachClient removes a specific client without closing its net.Conn.
-func (s *Session) detachClient(ac *attachedClient) {
-	if !s.removeClient(ac) {
-		return
-	}
-	s.arbitrateResize()
-}
-
-func (s *Session) disconnectActiveClient() {
-	s.clientMu.Lock()
-	ac := s.activeClient
-	if ac == nil && len(s.clients) == 1 {
-		ac = s.clients[0]
-	}
-	s.clientMu.Unlock()
-	if ac == nil {
-		return
-	}
-	if !s.removeClient(ac) {
-		return
-	}
-	s.arbitrateResize()
-	_ = ac.close()
-}
-
-// disconnectAllClients removes all clients and closes their connections.
-func (s *Session) disconnectAllClients() {
-	s.clientMu.Lock()
-	clients := s.clients
-	s.clients = nil
-	s.activeClient = nil
-	s.clientMu.Unlock()
-	for _, ac := range clients {
-		close(ac.outCh)
-		<-ac.done
-		ac.close()
-	}
-}
-
-func (s *Session) addClient(ac *attachedClient) {
-	s.clientMu.Lock()
-	s.clients = append(s.clients, ac)
-	count := uint16(len(s.clients))
-	s.clientMu.Unlock()
-	s.broadcastClientsChanged(count)
-}
-
-func (s *Session) removeClient(ac *attachedClient) bool {
-	s.clientMu.Lock()
-	found := false
-	for i, c := range s.clients {
-		if c == ac {
-			s.clients = append(s.clients[:i], s.clients[i+1:]...)
-			found = true
-			break
+	for {
+		// Nil-channel trick: only one of ptyCh/feedSend is active
+		// at a time. When pendingFeed is nil, read ptyOut. When
+		// non-nil, send to feedCh. Actions are always processed.
+		var ptyCh <-chan []byte
+		var feedSend chan<- *[]byte
+		if pendingFeed != nil {
+			feedSend = s.feedCh
+		} else {
+			ptyCh = s.ptyOut
 		}
-	}
-	if s.activeClient == ac {
-		s.activeClient = nil
-	}
-	count := uint16(len(s.clients))
-	s.clientMu.Unlock()
-	if !found {
-		return false
-	}
-	close(ac.outCh)
-	<-ac.done
-	s.broadcastClientsChanged(count)
-	return true
-}
 
-// broadcastOutput sends output data to all clients' outCh channels.
-// Evicts clients whose channels are full. Must be called with clientMu held.
-func (s *Session) broadcastOutput(data []byte) {
-	var evict []*attachedClient
-	for _, ac := range s.clients {
 		select {
-		case ac.outCh <- data:
-		default:
-			evict = append(evict, ac)
-		}
-	}
-	for _, ac := range evict {
-		for i, c := range s.clients {
-			if c == ac {
-				s.clients = append(s.clients[:i], s.clients[i+1:]...)
-				break
+		case data, ok := <-ptyCh:
+			if !ok {
+				close(s.feedCh)
+				exitMsg := &protocol.Exited{ExitCode: s.exitCode}
+				for _, c := range clients {
+					select {
+					case c.outCh <- exitMsg:
+						close(c.outCh)
+					default:
+						close(c.outCh)
+						c.closeConn()
+					}
+				}
+				return
+			}
+
+			msg := &protocol.Output{Data: data}
+			before := len(clients)
+			clients = broadcastOutput(clients, s.Name, msg)
+			if len(clients) != before {
+				notifyClientsChanged(clients, s.size)
+			}
+
+			bp := feedPool.Get().(*[]byte)
+			d := (*bp)[:len(data)]
+			copy(d, data)
+			*bp = d
+			pendingFeed = bp
+
+		case feedSend <- pendingFeed:
+			pendingFeed = nil
+
+		case action := <-s.actions:
+			switch a := action.(type) {
+			case attachReq:
+				if !a.readOnly {
+					s.resizeForPending(clients, a.cols, a.rows, a.xpixel, a.ypixel)
+				}
+
+				dump, err := s.term.DumpScreen(s.ctx, libghostty.DumpVTFull)
+				if err != nil {
+					a.result <- attachResp{err: err}
+					continue
+				}
+
+				nextClientID++
+				clientID := fmt.Sprintf("%d", nextClientID)
+				cols, rows := s.size()
+
+				sc := &sessionClient{
+					id:        clientID,
+					conn:      a.conn,
+					closeConn: a.closeConn,
+					cols:      a.cols,
+					rows:      a.rows,
+					xpixel:    a.xpixel,
+					ypixel:    a.ypixel,
+					version:   a.version,
+					readOnly:  a.readOnly,
+					outCh:     make(chan protocol.Message, 64),
+				}
+				go sc.writeLoop()
+
+				// Attached is the first message on outCh, guaranteed
+				// to precede any Output since the client isn't in the
+				// clients list yet.
+				sc.outCh <- &protocol.Attached{
+					Name:       s.Name,
+					PID:        s.PID,
+					ClientID:   clientID,
+					Cols:       cols,
+					Rows:       rows,
+					ScreenDump: dump.VT,
+					CursorRow:  dump.CursorRow,
+					CursorCol:  dump.CursorCol,
+					AltScreen:  dump.IsAltScreen,
+					Created:    a.created,
+				}
+
+				clients = append(clients, sc)
+				if !a.readOnly {
+					s.arbitrateResize(clients)
+				}
+				notifyClientsChanged(clients, s.size)
+
+				a.result <- attachResp{client: sc}
+
+			case detachReq:
+				before := len(clients)
+				clients = removeClient(clients, a.client)
+				if len(clients) == before {
+					continue // already removed (e.g., kicked)
+				}
+				close(a.client.outCh)
+				s.arbitrateResize(clients)
+				notifyClientsChanged(clients, s.size)
+
+			case kickReq:
+				var target *sessionClient
+				for _, c := range clients {
+					if c.id == a.clientID {
+						target = c
+						break
+					}
+				}
+				if target == nil {
+					a.result <- false
+					continue
+				}
+				clients = removeClient(clients, target)
+				close(target.outCh)
+				target.closeConn()
+				s.arbitrateResize(clients)
+				notifyClientsChanged(clients, s.size)
+				a.result <- true
+
+			case resizeReq:
+				a.client.cols = a.cols
+				a.client.rows = a.rows
+				a.client.xpixel = a.xpixel
+				a.client.ypixel = a.ypixel
+				s.arbitrateResize(clients)
+
+			case clientInfoReq:
+				info := make([]protocol.SessionClient, len(clients))
+				for i, c := range clients {
+					info[i] = protocol.SessionClient{
+						ClientID: c.id,
+						ReadOnly: c.readOnly,
+						Version:  c.version,
+					}
+				}
+				a.result <- info
+
+			case stopReq:
+				// Force-close: disconnect all clients, close feedCh, return.
+				// Clients see connection close (EOF), not Exited — this is
+				// the kill/shutdown path.
+				if pendingFeed != nil {
+					feedPool.Put(pendingFeed)
+					pendingFeed = nil
+				}
+				close(s.feedCh)
+				for _, c := range clients {
+					close(c.outCh)
+					c.closeConn()
+				}
+				return
 			}
 		}
-		if s.activeClient == ac {
-			s.activeClient = nil
-		}
-		slog.Debug("evicting slow client", "session", s.Name)
-		close(ac.outCh)
-		go func(ac *attachedClient) {
-			<-ac.done
-			ac.close()
-		}(ac)
 	}
 }
 
-func (s *Session) broadcastClientsChanged(count uint16) {
-	cols, rows := s.size()
+func removeClient(clients []*sessionClient, target *sessionClient) []*sessionClient {
+	for i, c := range clients {
+		if c == target {
+			return append(clients[:i], clients[i+1:]...)
+		}
+	}
+	return clients
+}
+
+func broadcastOutput(clients []*sessionClient, name string, msg *protocol.Output) []*sessionClient {
+	i := 0
+	for _, c := range clients {
+		select {
+		case c.outCh <- msg:
+			clients[i] = c
+			i++
+		default:
+			slog.Debug("evicting slow client", "session", name)
+			close(c.outCh)
+			c.closeConn()
+		}
+	}
+	return clients[:i]
+}
+
+func notifyClientsChanged(clients []*sessionClient, sizeFn func() (uint16, uint16)) {
+	cols, rows := sizeFn()
 	msg := &protocol.ClientsChanged{
-		Count: count,
+		Count: uint16(len(clients)),
 		Cols:  cols,
 		Rows:  rows,
 	}
-
-	s.clientMu.Lock()
-	clients := append([]*attachedClient(nil), s.clients...)
-	s.clientMu.Unlock()
-
-	for _, ac := range clients {
-		_ = ac.conn.WriteMessage(msg)
+	for _, c := range clients {
+		select {
+		case c.outCh <- msg:
+		default:
+		}
 	}
 }
 
-func exitCodeFromWaitStatus(ws syscall.WaitStatus) int32 {
-	if ws.Exited() {
-		return int32(ws.ExitStatus())
+func (s *Session) attach(ctx context.Context, conn *protocol.Conn, closeConn func() error, cols, rows, xpixel, ypixel uint16, version string, readOnly, created bool) (*sessionClient, error) {
+	ch := make(chan attachResp, 1)
+	req := attachReq{
+		conn:      conn,
+		closeConn: closeConn,
+		cols:      cols,
+		rows:      rows,
+		xpixel:    xpixel,
+		ypixel:    ypixel,
+		version:   version,
+		readOnly:  readOnly,
+		created:   created,
+		result:    ch,
 	}
-	if ws.Signaled() {
-		return int32(128 + ws.Signal())
+	select {
+	case s.actions <- req:
+	case <-s.done:
+		return nil, fmt.Errorf("session closed")
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return 1
+	// Don't select on ctx.Done() here — if the action was accepted,
+	// we must wait for the result to avoid orphaning the client.
+	select {
+	case resp := <-ch:
+		return resp.client, resp.err
+	case <-s.done:
+		return nil, fmt.Errorf("session closed")
+	}
 }
 
-func (s *Session) kill() {
-	syscall.Kill(-int(s.PID), syscall.SIGHUP)
+func (s *Session) detachClient(sc *sessionClient) {
+	select {
+	case s.actions <- detachReq{client: sc}:
+	case <-s.done:
+	}
+}
+
+func (s *Session) kickClient(clientID string) bool {
+	ch := make(chan bool, 1)
+	select {
+	case s.actions <- kickReq{clientID: clientID, result: ch}:
+	case <-s.done:
+		return false
+	}
+	select {
+	case found := <-ch:
+		return found
+	case <-s.done:
+		return false
+	}
+}
+
+func (s *Session) resizeClient(sc *sessionClient, cols, rows, xpixel, ypixel uint16) {
+	select {
+	case s.actions <- resizeReq{client: sc, cols: cols, rows: rows, xpixel: xpixel, ypixel: ypixel}:
+	case <-s.done:
+	}
+}
+
+func (s *Session) clientInfo() []protocol.SessionClient {
+	ch := make(chan []protocol.SessionClient, 1)
+	select {
+	case s.actions <- clientInfoReq{result: ch}:
+	case <-s.done:
+		return nil
+	}
+	select {
+	case info := <-ch:
+		return info
+	case <-s.done:
+		return nil
+	}
 }
 
 func (s *Session) sendInput(data []byte) error {
@@ -451,49 +619,76 @@ func (s *Session) sendInput(data []byte) error {
 	return err
 }
 
-func (s *Session) sendInputFrom(ac *attachedClient, data []byte) error {
-	if ac.readOnly {
-		return nil
-	}
-	s.clientMu.Lock()
-	s.activeClient = ac
-	s.clientMu.Unlock()
-	return s.sendInput(data)
-}
-
-func (s *Session) size() (uint16, uint16) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.Cols, s.Rows
-}
-
-func (s *Session) resize(ctx context.Context, cols, rows, xpixel, ypixel uint16) error {
-	s.mu.Lock()
-	s.Cols = cols
-	s.Rows = rows
-	s.mu.Unlock()
-
-	err := pty.Setsize(s.ptmx, &pty.Winsize{Rows: rows, Cols: cols, X: xpixel, Y: ypixel})
-	if err != nil {
-		return err
-	}
-	syscall.Kill(-int(s.PID), syscall.SIGWINCH)
-	if rerr := s.term.Resize(ctx, uint32(cols), uint32(rows)); rerr != nil {
-		slog.Warn("wasm resize", "session", s.Name, "err", rerr)
-	}
-	return nil
-}
-
 func (s *Session) dumpScreen(ctx context.Context, format libghostty.DumpFormat) (*libghostty.ScreenDump, error) {
 	return s.term.DumpScreen(ctx, format)
 }
 
-func (s *Session) isRunning() bool {
+func (s *Session) kill() {
+	syscall.Kill(-int(s.PID), syscall.SIGHUP)
+}
+
+func (s *Session) close(ctx context.Context) {
+	select {
+	case s.actions <- stopReq{}:
+	case <-s.done:
+	}
+
+	s.kill()
+	s.ptmx.Close() // unblock ptyRead if blocked on Read
 	select {
 	case <-s.done:
-		return false
-	default:
-		return true
+	case <-time.After(5 * time.Second):
+		slog.Warn("child ignored SIGHUP, sending SIGKILL", "session", s.Name)
+		syscall.Kill(-int(s.PID), syscall.SIGKILL)
+		<-s.done
+	}
+	s.term.Close(ctx)
+	if s.tempDir != "" {
+		os.RemoveAll(s.tempDir)
+	}
+}
+
+func (s *Session) resize(cols, rows, xpixel, ypixel uint16) {
+	s.setSize(cols, rows)
+
+	if err := pty.Setsize(s.ptmx, &pty.Winsize{Rows: rows, Cols: cols, X: xpixel, Y: ypixel}); err != nil {
+		slog.Warn("pty setsize", "session", s.Name, "err", err)
+	}
+	syscall.Kill(-int(s.PID), syscall.SIGWINCH)
+	if err := s.term.Resize(s.ctx, uint32(cols), uint32(rows)); err != nil {
+		slog.Warn("wasm resize", "session", s.Name, "err", err)
+	}
+}
+
+func collectClientDims(clients []*sessionClient) []clientDims {
+	dims := make([]clientDims, 0, len(clients))
+	for _, c := range clients {
+		if c.readOnly {
+			continue
+		}
+		dims = append(dims, clientDims{c.cols, c.rows, c.xpixel, c.ypixel})
+	}
+	return dims
+}
+
+func (s *Session) arbitrateResize(clients []*sessionClient) {
+	dims := collectClientDims(clients)
+	if len(dims) == 0 {
+		return
+	}
+	cols, rows, xpixel, ypixel := applyResizePolicy(s.resizePolicy, dims)
+	curCols, curRows := s.size()
+	if cols != curCols || rows != curRows {
+		s.resize(cols, rows, xpixel, ypixel)
+	}
+}
+
+func (s *Session) resizeForPending(clients []*sessionClient, cols, rows, xpixel, ypixel uint16) {
+	dims := append(collectClientDims(clients), clientDims{cols, rows, xpixel, ypixel})
+	targetCols, targetRows, targetXpixel, targetYpixel := applyResizePolicy(s.resizePolicy, dims)
+	curCols, curRows := s.size()
+	if targetCols != curCols || targetRows != curRows {
+		s.resize(targetCols, targetRows, targetXpixel, targetYpixel)
 	}
 }
 
@@ -531,62 +726,12 @@ func applyResizePolicy(policy string, dims []clientDims) (cols, rows, xpixel, yp
 	return
 }
 
-func (s *Session) collectClientDims() []clientDims {
-	dims := make([]clientDims, 0, len(s.clients))
-	for _, c := range s.clients {
-		if c.readOnly {
-			continue
-		}
-		dims = append(dims, clientDims{c.cols, c.rows, c.xpixel, c.ypixel})
+func exitCodeFromWaitStatus(ws syscall.WaitStatus) int32 {
+	if ws.Exited() {
+		return int32(ws.ExitStatus())
 	}
-	return dims
-}
-
-func (s *Session) arbitrateResize() {
-	s.clientMu.Lock()
-	if len(s.clients) == 0 {
-		s.clientMu.Unlock()
-		return
+	if ws.Signaled() {
+		return int32(128 + ws.Signal())
 	}
-	dims := s.collectClientDims()
-	s.clientMu.Unlock()
-
-	cols, rows, xpixel, ypixel := applyResizePolicy(s.resizePolicy, dims)
-	curCols, curRows := s.size()
-	if cols != curCols || rows != curRows {
-		s.resize(context.Background(), cols, rows, xpixel, ypixel)
-	}
-}
-
-// resizeForPendingClient computes and applies the resize that would
-// result from adding a client with the given dimensions, without
-// actually adding it to the client list. This is used before dumping
-// the screen on attach so the dump reflects the correct size.
-func (s *Session) resizeForPendingClient(ctx context.Context, cols, rows, xpixel, ypixel uint16) {
-	s.clientMu.Lock()
-	dims := append(s.collectClientDims(), clientDims{cols, rows, xpixel, ypixel})
-	s.clientMu.Unlock()
-
-	targetCols, targetRows, targetXpixel, targetYpixel := applyResizePolicy(s.resizePolicy, dims)
-	curCols, curRows := s.size()
-	if targetCols != curCols || targetRows != curRows {
-		s.resize(ctx, targetCols, targetRows, targetXpixel, targetYpixel)
-	}
-}
-
-func (s *Session) close(ctx context.Context) {
-	s.disconnectAllClients()
-	s.kill()
-	select {
-	case <-s.done:
-	case <-time.After(5 * time.Second):
-		slog.Warn("child ignored SIGHUP, sending SIGKILL", "session", s.Name)
-		syscall.Kill(-int(s.PID), syscall.SIGKILL)
-		<-s.done
-	}
-	s.ptmx.Close()
-	s.term.Close(ctx)
-	if s.tempDir != "" {
-		os.RemoveAll(s.tempDir)
-	}
+	return 1
 }

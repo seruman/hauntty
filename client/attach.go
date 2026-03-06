@@ -56,7 +56,7 @@ func findDetach(data []byte, dk DetachKey) int {
 	return bytes.Index(data, dk.csiSeq)
 }
 
-func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardEnv []string, readOnly bool) error {
+func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardEnv []string, readOnly, restore bool) error {
 	fd := int(os.Stdin.Fd())
 
 	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
@@ -66,19 +66,22 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 
 	env := CollectForwardedEnv(forwardEnv)
 
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get cwd: %w", err)
+	}
 
-	ok, state, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd, readOnly)
+	attached, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd, readOnly, restore)
 	if err != nil {
 		return err
 	}
 
-	if ok.Created {
-		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", ok.SessionName, ok.PID)
+	if attached.Created {
+		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", attached.Name, attached.PID)
 	} else if readOnly {
-		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", ok.SessionName, ok.PID)
+		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", attached.Name, attached.PID)
 	} else {
-		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", ok.SessionName, ok.PID)
+		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", attached.Name, attached.PID)
 	}
 
 	// Push kitty keyboard level to isolate inner session keyboard
@@ -87,7 +90,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		return fmt.Errorf("push kitty keyboard: %w", err)
 	}
 
-	if !ok.Created && len(state.ScreenDump) > 0 {
+	if !attached.Created && len(attached.ScreenDump) > 0 {
 		// Reattach: preserve visible content in scrollback, then
 		// clear for the dump. Query cursor row via DSR so we
 		// scroll exactly the content-bearing rows — no blank
@@ -109,7 +112,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		clear.WriteString("\x1b[H")
 		os.Stdout.Write(clear.Bytes())
 
-		if _, err := os.Stdout.Write(state.ScreenDump); err != nil {
+		if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
 			return fmt.Errorf("write state dump: %w", err)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -29,12 +30,13 @@ type CLI struct {
 	Version    kong.VersionFlag `help:"Print version."`
 	Socket     string           `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
 	Attach     AttachCmd        `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
-	New        NewCmd           `cmd:"" help:"Create/start a session without attaching."`
+	New        NewCmd           `cmd:"" help:"Create a session without attaching."`
+	Restore    RestoreCmd       `cmd:"" help:"Restore a dead session from saved state."`
 	List       ListCmd          `cmd:"" aliases:"ls" help:"List sessions."`
 	Kill       KillCmd          `cmd:"" help:"Kill a session."`
 	Send       SendCmd          `cmd:"" help:"Send input to a session."`
 	Dump       DumpCmd          `cmd:"" help:"Dump session contents."`
-	Detach     DetachCmd        `cmd:"" help:"Detach from current session."`
+	Kick       KickCmd          `cmd:"" help:"Disconnect a specific attached client."`
 	Wait       WaitCmd          `cmd:"" help:"Wait for session output to match a pattern."`
 	Status     StatusCmd        `cmd:"" aliases:"st" help:"Show daemon and session status."`
 	Prune      PruneCmd         `cmd:"" help:"Delete dead session state files."`
@@ -44,11 +46,6 @@ type CLI struct {
 	Completion CompletionCmd    `cmd:"" help:"Print shell completion setup instructions."`
 	Complete   CompleteCmd      `cmd:"" hidden:"" name:"__complete" help:"Internal completion data provider."`
 }
-
-const (
-	headlessCols = 120
-	headlessRows = 30
-)
 
 type AttachCmd struct {
 	Name     string   `arg:"" optional:"" help:"Session name."`
@@ -84,12 +81,13 @@ func (cmd *AttachCmd) Run(cfg *config.Config) error {
 
 	command := resolveCommand(cmd.Command, cfg)
 
-	return c.RunAttach(cmd.Name, command, dk, cfg.Client.ForwardEnv, cmd.ReadOnly)
+	return c.RunAttach(cmd.Name, command, dk, cfg.Client.ForwardEnv, cmd.ReadOnly, false)
 }
 
 type NewCmd struct {
 	Name    string   `arg:"" optional:"" help:"Session name."`
 	Command []string `arg:"" optional:"" help:"Command to run."`
+	Force   bool     `short:"f" help:"Overwrite dead session state if it exists."`
 }
 
 func (cmd *NewCmd) Run(cfg *config.Config) error {
@@ -107,16 +105,14 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 
-	ok, _, err := c.Attach(cmd.Name, headlessCols, headlessRows, 0, 0, resolveCommand(cmd.Command, cfg), client.CollectForwardedEnv(cfg.Client.ForwardEnv), 10000, cwd, false)
+	env := client.CollectForwardedEnv(cfg.Client.ForwardEnv)
+	created, err := c.Create(cmd.Name, resolveCommand(cmd.Command, cfg), env, cwd, 0, cmd.Force)
 	if err != nil {
 		return err
 	}
 
-	if ok.Created {
-		fmt.Printf("created session %q\n", ok.SessionName)
-		return nil
-	}
-	return fmt.Errorf("session %q already exists", ok.SessionName)
+	fmt.Printf("created session %q (pid %d)\n", created.Name, created.PID)
+	return nil
 }
 
 type ListCmd struct {
@@ -130,12 +126,16 @@ func (cmd *ListCmd) Run(cfg *config.Config) error {
 	}
 	defer c.Close()
 
-	sessions, err := c.List()
+	sessions, err := c.List(false)
 	if err != nil {
 		return err
 	}
 
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Debug("resolve home dir", "err", err)
+		home = ""
+	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tCWD\tPID\tCREATED")
@@ -264,21 +264,54 @@ func (cmd *DumpCmd) Run(cfg *config.Config) error {
 	return err
 }
 
-type DetachCmd struct{}
+type RestoreCmd struct {
+	Name     string `arg:"" help:"Session name to restore."`
+	ReadOnly bool   `short:"r" help:"Attach in read-only mode."`
+}
 
-func (cmd *DetachCmd) Run(cfg *config.Config) error {
-	sessionName := os.Getenv("HAUNTTY_SESSION")
-	if sessionName == "" {
-		return fmt.Errorf("not inside a hauntty session")
+func (cmd *RestoreCmd) Run(cfg *config.Config) error {
+	if s := os.Getenv("HAUNTTY_SESSION"); s != "" {
+		return fmt.Errorf("already inside session %q, nested sessions are not supported", s)
 	}
 
+	if !isInteractiveAttachTTY() {
+		return fmt.Errorf("restore requires a TTY")
+	}
+
+	dk, err := client.ParseDetachKey(cfg.Client.DetachKeybind)
+	if err != nil {
+		return fmt.Errorf("invalid detach_keybind %q: %w", cfg.Client.DetachKeybind, err)
+	}
+
+	if err := ensureDaemon(cfg.Daemon.SocketPath); err != nil {
+		return err
+	}
 	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 
-	return c.DetachSession(sessionName)
+	return c.RunAttach(cmd.Name, nil, dk, cfg.Client.ForwardEnv, cmd.ReadOnly, true)
+}
+
+type KickCmd struct {
+	Name     string `arg:"" help:"Session name."`
+	ClientID string `arg:"" help:"Client ID to disconnect."`
+}
+
+func (cmd *KickCmd) Run(cfg *config.Config) error {
+	c, err := client.Connect(cfg.Daemon.SocketPath)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if err := c.Kick(cmd.Name, cmd.ClientID); err != nil {
+		return err
+	}
+	fmt.Printf("kicked client %s from session %q\n", cmd.ClientID, cmd.Name)
+	return nil
 }
 
 type StatusCmd struct{}
@@ -295,7 +328,11 @@ func (cmd *StatusCmd) Run(cfg *config.Config) error {
 		return err
 	}
 
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Debug("resolve home dir", "err", err)
+		home = ""
+	}
 
 	d := resp.Daemon
 	fmt.Printf("daemon:   running (pid %d, uptime %s)\n", d.PID, formatUptime(d.Uptime))
@@ -315,9 +352,13 @@ func (cmd *StatusCmd) Run(cfg *config.Config) error {
 		fmt.Printf("size:     %dx%d\n", s.Cols, s.Rows)
 		fmt.Printf("cwd:      %s\n", cwd)
 		fmt.Printf("pid:      %d\n", s.PID)
-		fmt.Printf("clients:  %d\n", s.ClientCount)
-		for i, v := range s.ClientVersions {
-			fmt.Printf("  [%d]:    %s\n", i, v)
+		fmt.Printf("clients:  %d\n", len(s.Clients))
+		for _, cl := range s.Clients {
+			ro := ""
+			if cl.ReadOnly {
+				ro = " (read-only)"
+			}
+			fmt.Printf("  [%s]:   %s%s\n", cl.ClientID, cl.Version, ro)
 		}
 	}
 
@@ -478,7 +519,7 @@ func (cmd *CompleteCmd) Run(cfg *config.Config) error {
 		}
 		defer c.Close()
 
-		sessions, err := c.List()
+		sessions, err := c.List(false)
 		if err != nil {
 			return nil
 		}
