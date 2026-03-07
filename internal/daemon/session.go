@@ -98,9 +98,9 @@ type Session struct {
 	feedCh  chan *[]byte
 	tempDir string
 
-	actions chan any
-	ptyOut chan []byte
-	done chan struct{}
+	actions  chan any
+	ptyOut   chan []byte
+	done     chan struct{}
 	exitCode int32
 
 	// sizeVal packs cols|rows as (cols<<16)|rows for lock-free reads.
