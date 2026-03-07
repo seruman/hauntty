@@ -18,7 +18,7 @@ import (
 
 var (
 	htBin        string
-	hostPromptRE = regexp.MustCompile(`\$ ?$`)
+	hostPromptRE = regexp.MustCompile(`^\$ ?$`)
 )
 
 type testEnv struct {

@@ -117,8 +117,6 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		}
 	}
 
-	// Enter raw mode after writing the state dump so OPOST translates
-	// \n in the VT dump to \r\n correctly while in cooked mode.
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return fmt.Errorf("set raw mode: %w", err)
@@ -201,11 +199,18 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		}
 	}()
 
+	if attached.Created && len(command) > 0 && len(attached.ScreenDump) > 0 {
+		if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
+			return fmt.Errorf("write state dump: %w", err)
+		}
+	}
+
 	handleMsg := func(msg protocol.Message) error {
 		switch m := msg.(type) {
 		case *protocol.Output:
 			os.Stdout.Write(m.Data)
 		case *protocol.Exited:
+			restoreHostTerminal(fd, oldState, "[hauntty] session exited\n")
 			return &ExitError{Code: int(m.ExitCode)}
 		case *protocol.Error:
 			term.Restore(fd, oldState)
@@ -222,23 +227,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		if err != nil {
 			close(done)
 			if err == io.EOF || isConnClosed(err) {
-				// Use 1047 (not 1049) to exit alt screen: 1047
-				// just switches the buffer without restoring the
-				// saved cursor, so session content on the primary
-				// screen stays intact. No-op when already on primary.
-				//
-				// Reset modes, show cursor, pop kitty keyboard,
-				// reset SGR, erase from cursor to end of screen.
-				// Session content above the cursor is preserved.
-				os.Stdout.Write([]byte(
-					"\x1b[?1047;1;1000;1002;1003;1006;1004;2004;2048;2026l" +
-						"\x1b[?25h" +
-						"\x1b[<u" +
-						"\x1b[0m" +
-						"\x1b[J"))
-				drainStdin(fd, 20*time.Millisecond)
-				term.Restore(fd, oldState)
-				fmt.Fprintf(os.Stderr, "[hauntty] detached\n")
+				restoreHostTerminal(fd, oldState, "[hauntty] detached\n")
 				return nil
 			}
 			term.Restore(fd, oldState)
@@ -246,9 +235,29 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		}
 		if err := handleMsg(msg); err != nil {
 			close(done)
-			term.Restore(fd, oldState)
 			return err
 		}
+	}
+}
+
+func restoreHostTerminal(fd int, oldState *term.State, message string) {
+	// Use 1047 (not 1049) to exit alt screen: 1047 just switches the
+	// buffer without restoring the saved cursor, so session content on
+	// the primary screen stays intact. No-op when already on primary.
+	//
+	// Reset modes, show cursor, pop kitty keyboard, reset SGR, erase
+	// from cursor to end of screen. Session content above the cursor is
+	// preserved.
+	os.Stdout.Write([]byte(
+		"\x1b[?1047;1;1000;1002;1003;1006;1004;2004;2048;2026l" +
+			"\x1b[?25h" +
+			"\x1b[<u" +
+			"\x1b[0m" +
+			"\x1b[J"))
+	drainStdin(fd, 20*time.Millisecond)
+	term.Restore(fd, oldState)
+	if message != "" {
+		fmt.Fprint(os.Stderr, message)
 	}
 }
 

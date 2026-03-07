@@ -24,6 +24,11 @@ var feedPool = sync.Pool{
 	},
 }
 
+type feedItem struct {
+	data *[]byte
+	seq  uint64
+}
+
 // All fields are owned exclusively by the session's run loop.
 type sessionClient struct {
 	id        string
@@ -95,13 +100,14 @@ type Session struct {
 	ptmx    *os.File
 	cmd     *exec.Cmd
 	term    *libghostty.Terminal
-	feedCh  chan *[]byte
+	feedCh  chan feedItem
 	tempDir string
 
-	actions  chan any
-	ptyOut   chan []byte
-	done     chan struct{}
-	exitCode int32
+	actions     chan any
+	ptyOut      chan []byte
+	done        chan struct{}
+	exitCode    int32
+	feedApplied atomic.Uint64
 
 	// sizeVal packs cols|rows as (cols<<16)|rows for lock-free reads.
 	sizeVal atomic.Uint32
@@ -191,7 +197,7 @@ func newSession(ctx context.Context, name string, command []string, env []string
 		ptmx:         ptmx,
 		cmd:          cmd,
 		term:         term,
-		feedCh:       make(chan *[]byte, 64),
+		feedCh:       make(chan feedItem, 64),
 		tempDir:      tempDir,
 		actions:      make(chan any, 16),
 		ptyOut:       make(chan []byte, 64),
@@ -270,7 +276,7 @@ func restoreSession(ctx context.Context, name string, command []string, env []st
 		ptmx:         ptmx,
 		cmd:          cmd,
 		term:         term,
-		feedCh:       make(chan *[]byte, 64),
+		feedCh:       make(chan feedItem, 64),
 		tempDir:      tempDir,
 		actions:      make(chan any, 16),
 		ptyOut:       make(chan []byte, 64),
@@ -287,12 +293,20 @@ func restoreSession(ctx context.Context, name string, command []string, env []st
 }
 
 func (s *Session) feedLoop(ctx context.Context) {
-	for bp := range s.feedCh {
-		if err := s.term.Feed(ctx, *bp); err != nil {
+	for item := range s.feedCh {
+		if err := s.term.Feed(ctx, *item.data); err != nil {
 			slog.Debug("wasm feed error", "session", s.Name, "err", err)
 		}
-		*bp = (*bp)[:cap(*bp)]
-		feedPool.Put(bp)
+		s.feedApplied.Store(item.seq)
+		*item.data = (*item.data)[:cap(*item.data)]
+		feedPool.Put(item.data)
+	}
+}
+
+// waitFeedApplied blocks until feedLoop has applied every PTY chunk up to target.
+func (s *Session) waitFeedApplied(target uint64) {
+	for s.feedApplied.Load() < target {
+		time.Sleep(100 * time.Microsecond)
 	}
 }
 
@@ -331,16 +345,19 @@ func (s *Session) run() {
 	// pendingFeed holds data waiting to be sent to feedCh. While
 	// non-nil, we stop reading ptyOut (backpressure) but keep
 	// processing actions so detach/kick/list don't stall.
-	var pendingFeed *[]byte
+	var pendingFeed *feedItem
+	var nextFeedSeq uint64
 
 	for {
 		// Nil-channel trick: only one of ptyCh/feedSend is active
 		// at a time. When pendingFeed is nil, read ptyOut. When
 		// non-nil, send to feedCh. Actions are always processed.
 		var ptyCh <-chan []byte
-		var feedSend chan<- *[]byte
+		var feedSend chan<- feedItem
+		var feedItemToSend feedItem
 		if pendingFeed != nil {
 			feedSend = s.feedCh
+			feedItemToSend = *pendingFeed
 		} else {
 			ptyCh = s.ptyOut
 		}
@@ -373,9 +390,10 @@ func (s *Session) run() {
 			d := (*bp)[:len(data)]
 			copy(d, data)
 			*bp = d
-			pendingFeed = bp
+			nextFeedSeq++
+			pendingFeed = &feedItem{data: bp, seq: nextFeedSeq}
 
-		case feedSend <- pendingFeed:
+		case feedSend <- feedItemToSend:
 			pendingFeed = nil
 
 		case action := <-s.actions:
@@ -384,6 +402,12 @@ func (s *Session) run() {
 				if !a.readOnly {
 					s.resizeForPending(clients, a.cols, a.rows, a.xpixel, a.ypixel)
 				}
+				if pendingFeed != nil {
+					s.feedCh <- *pendingFeed
+					pendingFeed = nil
+				}
+				// Attach dumps must reflect every PTY chunk we've already accepted.
+				s.waitFeedApplied(nextFeedSeq)
 
 				dump, err := s.term.DumpScreen(s.ctx, libghostty.DumpVTFull)
 				if err != nil {
@@ -485,7 +509,7 @@ func (s *Session) run() {
 				// Clients see connection close (EOF), not Exited — this is
 				// the kill/shutdown path.
 				if pendingFeed != nil {
-					feedPool.Put(pendingFeed)
+					feedPool.Put(pendingFeed.data)
 					pendingFeed = nil
 				}
 				close(s.feedCh)

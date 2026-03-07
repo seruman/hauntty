@@ -295,6 +295,7 @@ func TestDetachFailurePathHostCleanup(t *testing.T) {
 	kill := e.run("kill", "fail-cleanup")
 	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"fail-cleanup\"\n"})
 
+	sh.WaitFor("session exited")
 	e.waitHostPrompt(sh)
 	sh.Type("echo failure-cleanup-ok\n")
 	sh.WaitFor("failure-cleanup-ok")

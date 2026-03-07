@@ -370,6 +370,53 @@ func TestRestoreDeadSession(t *testing.T) {
 	e.waitHostPrompt(restoreSh)
 }
 
+func TestRestoreDeadSessionAfterHostOutput(t *testing.T) {
+	cfg := config.Default()
+	cfg.Client.DetachKeybind = "ctrl+]"
+	cfg.Daemon.StatePersistence = true
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon"})
+	daemon.WaitFor("daemon listening")
+
+	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(sh)
+	sh.Type("$HT_BIN attach restore-host-output\n")
+	sh.WaitFor("created session")
+	e.waitAttachedPrompt(sh)
+
+	sh.Type("echo restore-marker\n")
+	sh.WaitFor("restore-marker")
+	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
+
+	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.WaitFor("detached")
+	e.waitHostPrompt(sh)
+
+	kill := e.run("kill", "restore-host-output")
+	kill.Assert(t, icmd.Expected{ExitCode: 0})
+	time.Sleep(500 * time.Millisecond)
+
+	dump := e.run("dump", "restore-host-output")
+	dump.Assert(t, icmd.Expected{ExitCode: 0})
+
+	restoreSh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
+	e.waitHostPrompt(restoreSh)
+	restoreSh.Type("echo host-before\n")
+	restoreSh.WaitFor("host-before")
+	restoreSh.Type("$HT_BIN restore restore-host-output\n")
+	restoreSh.WaitFor("attached to session")
+	restoreSh.WaitFor("restore-marker")
+	e.waitAttachedPrompt(restoreSh)
+
+	restoreSh.Type("echo restored-ok\n")
+	restoreSh.WaitFor("restored-ok")
+
+	restoreSh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	restoreSh.WaitFor("detached")
+	e.waitHostPrompt(restoreSh)
+}
+
 func TestRestoreRunningSessionFails(t *testing.T) {
 	cfg := config.Default()
 	cfg.Daemon.AutoExit = true
