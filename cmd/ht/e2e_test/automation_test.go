@@ -166,9 +166,8 @@ func TestDumpDeadSessionPreservesFormats(t *testing.T) {
 
 	kill := e.run("kill", "dead-dump-formats")
 	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"dead-dump-formats\"\n"})
-	time.Sleep(500 * time.Millisecond)
 
-	deadPlain := e.run("dump", "dead-dump-formats", "--format", "plain")
+	deadPlain := e.waitForCommandSuccess("dump", "dead-dump-formats", "--format", "plain")
 	deadPlain.Assert(t, icmd.Success)
 	golden.Assert(t, deadPlain.Stdout(), "dump_dead_plain.golden")
 
@@ -199,9 +198,8 @@ func TestDumpDeadSessionPreservesJoinFlag(t *testing.T) {
 
 	kill := e.run("kill", "dead-dump-join")
 	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"dead-dump-join\"\n"})
-	time.Sleep(500 * time.Millisecond)
 
-	deadPlain := e.run("dump", "dead-dump-join", "--format", "plain")
+	deadPlain := e.waitForCommandSuccess("dump", "dead-dump-join", "--format", "plain")
 	deadPlain.Assert(t, icmd.Success)
 	golden.Assert(t, deadPlain.Stdout(), "dump_dead_wrap_plain.golden")
 

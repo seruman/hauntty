@@ -193,7 +193,7 @@ func (t *Terminal) Resize(ctx context.Context, cols, rows uint32) error {
 }
 
 type ScreenDump struct {
-	VT          []byte
+	Data        []byte
 	CursorRow   uint32
 	CursorCol   uint32
 	IsAltScreen bool
@@ -304,7 +304,7 @@ func (t *Terminal) DumpScreen(ctx context.Context, format DumpFormat) (*ScreenDu
 	isAlt := uint32(results[0]) == 1
 
 	return &ScreenDump{
-		VT:          vt,
+		Data:        vt,
 		CursorRow:   cursorRow,
 		CursorCol:   cursorCol,
 		IsAltScreen: isAlt,
@@ -327,29 +327,35 @@ func (t *Terminal) EncodeKey(ctx context.Context, keyCode KeyCode, mods Modifier
 	return t.readResult(ctx, length)
 }
 
-func (t *Terminal) GetPwd(ctx context.Context) string {
+func (t *Terminal) GetCwd(ctx context.Context) (string, bool, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	results, err := t.gxGetPwdLen.Call(ctx)
-	if err != nil || results[0] == 0 {
-		return ""
+	if err != nil {
+		return "", false, fmt.Errorf("wasm: gx_get_pwd_len: %w", err)
+	}
+	if results[0] == 0 {
+		return "", false, nil
 	}
 	length := uint32(results[0])
 
 	results, err = t.gxGetPwdPtr.Call(ctx)
-	if err != nil || results[0] == 0 {
-		return ""
+	if err != nil {
+		return "", false, fmt.Errorf("wasm: gx_get_pwd_ptr: %w", err)
+	}
+	if results[0] == 0 {
+		return "", false, fmt.Errorf("wasm: gx_get_pwd_ptr returned null")
 	}
 	ptr := uint32(results[0])
 
 	buf, ok := t.mod.Memory().Read(ptr, length)
 	if !ok {
-		return ""
+		return "", false, fmt.Errorf("wasm: memory read failed")
 	}
 	raw := make([]byte, len(buf))
 	copy(raw, buf)
-	return stripFileURL(string(raw))
+	return stripFileURL(string(raw)), true, nil
 }
 
 func stripFileURL(raw string) string {

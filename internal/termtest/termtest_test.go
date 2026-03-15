@@ -72,7 +72,7 @@ func TestSnapshot(t *testing.T) {
 	tm.WaitFor("snap")
 
 	dump := tm.Snapshot(libghostty.DumpVTFull)
-	assert.Assert(t, len(dump.VT) > 0, "VT dump should not be empty")
+	assert.Assert(t, len(dump.Data) > 0, "VT dump should not be empty")
 }
 
 func TestWaitRowContains(t *testing.T) {

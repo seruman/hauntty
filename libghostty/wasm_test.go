@@ -31,7 +31,7 @@ func TestBasicFeedAndDump(t *testing.T) {
 
 	dump, err := term.DumpScreen(ctx, libghostty.DumpVTFull)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, dump.VT, []byte("Hello, World!\x1b[0m\x1b[2;1H"))
+	assert.DeepEqual(t, dump.Data, []byte("Hello, World!\x1b[0m\x1b[2;1H"))
 }
 
 func TestResize(t *testing.T) {
@@ -51,7 +51,7 @@ func TestResize(t *testing.T) {
 
 	dump, err := term.DumpScreen(ctx, libghostty.DumpVTFull)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, dump.VT, []byte("after resize\x1b[0m\x1b[1;13H"))
+	assert.DeepEqual(t, dump.Data, []byte("after resize\x1b[0m\x1b[1;13H"))
 }
 
 func TestCursorPosition(t *testing.T) {
@@ -124,8 +124,8 @@ func TestMultipleTerminals(t *testing.T) {
 	dump2, err := term2.DumpScreen(ctx, libghostty.DumpVTFull)
 	assert.NilError(t, err)
 
-	assert.DeepEqual(t, dump1.VT, []byte("terminal one\x1b[0m\x1b[1;13H"))
-	assert.DeepEqual(t, dump2.VT, []byte("terminal two\x1b[0m\x1b[1;13H"))
+	assert.DeepEqual(t, dump1.Data, []byte("terminal one\x1b[0m\x1b[1;13H"))
+	assert.DeepEqual(t, dump2.Data, []byte("terminal two\x1b[0m\x1b[1;13H"))
 }
 
 func TestDumpUnwrap(t *testing.T) {
@@ -143,11 +143,11 @@ func TestDumpUnwrap(t *testing.T) {
 
 	wrapped, err := term.DumpScreen(ctx, libghostty.DumpPlain)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, wrapped.VT, []byte("aaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbb"))
+	assert.DeepEqual(t, wrapped.Data, []byte("aaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbb"))
 
 	unwrapped, err := term.DumpScreen(ctx, libghostty.DumpPlain|libghostty.DumpFlagUnwrap)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, unwrapped.VT, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
+	assert.DeepEqual(t, unwrapped.Data, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
 }
 
 func TestDumpScrollback(t *testing.T) {
@@ -168,13 +168,13 @@ func TestDumpScrollback(t *testing.T) {
 	t.Run("visible only", func(t *testing.T) {
 		dump, err := term.DumpScreen(ctx, libghostty.DumpPlain)
 		assert.NilError(t, err)
-		assert.DeepEqual(t, dump.VT, []byte("line 7\nline 8\nline 9\nline 10"))
+		assert.DeepEqual(t, dump.Data, []byte("line 7\nline 8\nline 9\nline 10"))
 	})
 
 	t.Run("with scrollback", func(t *testing.T) {
 		dump, err := term.DumpScreen(ctx, libghostty.DumpPlain|libghostty.DumpFlagScrollback)
 		assert.NilError(t, err)
-		assert.DeepEqual(t, dump.VT, []byte("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"))
+		assert.DeepEqual(t, dump.Data, []byte("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"))
 	})
 }
 
@@ -192,7 +192,7 @@ func TestDumpHTML(t *testing.T) {
 
 	dump, err := term.DumpScreen(ctx, libghostty.DumpHTML)
 	assert.NilError(t, err)
-	golden.AssertBytes(t, dump.VT, "dump_html.golden")
+	golden.AssertBytes(t, dump.Data, "dump_html.golden")
 }
 
 func TestEncodeKey(t *testing.T) {
@@ -279,7 +279,7 @@ func TestEncodeKeyKittyMode(t *testing.T) {
 	})
 }
 
-func TestGetPwd(t *testing.T) {
+func TestGetCwd(t *testing.T) {
 	ctx := t.Context()
 	rt, err := libghostty.NewRuntime(ctx)
 	assert.NilError(t, err)
@@ -288,19 +288,31 @@ func TestGetPwd(t *testing.T) {
 	term := newTerminal(t, rt, 80, 24, 1000)
 	defer term.Close(ctx)
 
-	assert.Equal(t, term.GetPwd(ctx), "")
+	pwd, ok, err := term.GetCwd(ctx)
+	assert.NilError(t, err)
+	assert.Equal(t, ok, false)
+	assert.Equal(t, pwd, "")
 
 	err = term.Feed(ctx, []byte("\x1b]7;file:///tmp/example\x1b\\"))
 	assert.NilError(t, err)
-	assert.Equal(t, term.GetPwd(ctx), "/tmp/example")
+	pwd, ok, err = term.GetCwd(ctx)
+	assert.NilError(t, err)
+	assert.Equal(t, ok, true)
+	assert.Equal(t, pwd, "/tmp/example")
 
 	err = term.Feed(ctx, []byte("\x1b]7;file:///home/user/src\x07"))
 	assert.NilError(t, err)
-	assert.Equal(t, term.GetPwd(ctx), "/home/user/src")
+	pwd, ok, err = term.GetCwd(ctx)
+	assert.NilError(t, err)
+	assert.Equal(t, ok, true)
+	assert.Equal(t, pwd, "/home/user/src")
 
 	err = term.Feed(ctx, []byte("\x1b]7;kitty-shell-cwd://myhost/var/log\x07"))
 	assert.NilError(t, err)
-	assert.Equal(t, term.GetPwd(ctx), "/var/log")
+	pwd, ok, err = term.GetCwd(ctx)
+	assert.NilError(t, err)
+	assert.Equal(t, ok, true)
+	assert.Equal(t, pwd, "/var/log")
 }
 
 func TestReInit(t *testing.T) {
@@ -320,5 +332,5 @@ func TestReInit(t *testing.T) {
 
 	dump, err := term2.DumpScreen(ctx, libghostty.DumpVTFull)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, dump.VT, []byte("\x1b[0m\x1b[1;1H"))
+	assert.DeepEqual(t, dump.Data, []byte("\x1b[0m\x1b[1;1H"))
 }

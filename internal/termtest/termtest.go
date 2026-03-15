@@ -161,8 +161,8 @@ func New(t testing.TB, command []string, opts ...Option) *Term {
 	go tm.readLoop()
 
 	t.Cleanup(func() {
-		cmd.Process.Signal(os.Signal(os.Kill))
-		cmd.Wait()
+		_ = cmd.Process.Signal(os.Signal(os.Kill))
+		_ = cmd.Wait()
 		<-tm.done
 		ptmx.Close()
 		term.Close(ctx)
@@ -176,7 +176,7 @@ func (tm *Term) readLoop() {
 	for {
 		n, err := tm.ptmx.Read(buf)
 		if n > 0 {
-			tm.term.Feed(tm.ctx, buf[:n])
+			_ = tm.term.Feed(tm.ctx, buf[:n])
 		}
 		if err != nil {
 			break
@@ -211,7 +211,7 @@ func (tm *Term) Screen() string {
 	if err != nil {
 		tm.t.Fatalf("termtest: dump screen: %v", err)
 	}
-	return string(dump.VT)
+	return string(dump.Data)
 }
 
 func (tm *Term) ScreenVT() []byte {
@@ -220,7 +220,7 @@ func (tm *Term) ScreenVT() []byte {
 	if err != nil {
 		tm.t.Fatalf("termtest: dump screen vt: %v", err)
 	}
-	return dump.VT
+	return dump.Data
 }
 
 func (tm *Term) Snapshot(format libghostty.DumpFormat) *libghostty.ScreenDump {
@@ -287,7 +287,7 @@ func (tm *Term) WaitFor(substr string, opts ...WaitOption) {
 			if err != nil {
 				continue
 			}
-			last = string(dump.VT)
+			last = string(dump.Data)
 			if strings.Contains(last, substr) {
 				return
 			}
@@ -338,7 +338,7 @@ func (tm *Term) WaitRowContains(row int, substr string, opts ...WaitOption) {
 			if err != nil {
 				continue
 			}
-			last = string(dump.VT)
+			last = string(dump.Data)
 			if rowContainsDump(dump, row, substr) {
 				return
 			}
@@ -367,7 +367,7 @@ func (tm *Term) WaitCursorRowContains(substr string, opts ...WaitOption) {
 			if err != nil {
 				continue
 			}
-			last = string(dump.VT)
+			last = string(dump.Data)
 			if rowContainsDump(dump, int(dump.CursorRow), substr) {
 				return
 			}
@@ -418,7 +418,7 @@ func (tm *Term) WaitPromptMatch(match func(string) bool, opts ...WaitOption) {
 			if err != nil {
 				continue
 			}
-			last = string(dump.VT)
+			last = string(dump.Data)
 			row := int(dump.CursorRow)
 			if promptOnRowMatch(dump, row, match) || promptOnRowMatch(dump, row-1, match) {
 				return
@@ -449,7 +449,7 @@ func (tm *Term) WaitStable(stableFor time.Duration, opts ...WaitOption) {
 			if err != nil {
 				continue
 			}
-			cur := string(dump.VT)
+			cur := string(dump.Data)
 			if cur != last {
 				last = cur
 				sameSince = time.Now()
@@ -479,7 +479,7 @@ func rowContainsDump(dump *libghostty.ScreenDump, row int, substr string) bool {
 }
 
 func rowLine(dump *libghostty.ScreenDump, row int) (string, bool) {
-	lines := strings.Split(string(dump.VT), "\n")
+	lines := strings.Split(string(dump.Data), "\n")
 	if row < 0 || row >= len(lines) {
 		return "", false
 	}

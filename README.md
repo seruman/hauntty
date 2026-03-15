@@ -14,6 +14,11 @@ If Ghostty is installed, hauntty injects its shell integration scripts.
 
 The `ht` client talks to the daemon over a Unix socket.
 
+## Ghostty layout
+
+- `vt/` is the patched Ghostty VT build workspace used to produce the WASM terminal runtime.
+- `libghostty/` is the Go wrapper that loads that runtime and exposes terminal operations to hauntty.
+
 ## Commands
 
 ```
@@ -82,7 +87,7 @@ default_scrollback = 10000
 # Persist dead session state to disk.
 state_persistence = true
 
-# Save session state every N seconds while the session is running.
+# Save session state every N seconds while the session is running. Must be > 0.
 state_persistence_interval = 30
 
 [client]

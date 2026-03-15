@@ -1,9 +1,13 @@
 package e2e_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"gotest.tools/v3/assert"
 	"gotest.tools/v3/icmd"
 
 	"code.selman.me/hauntty/internal/config"
@@ -224,6 +228,35 @@ func TestNewWithCommand(t *testing.T) {
 	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"new-command\"\n"})
 }
 
+func TestNewUsesGhosttyBashIntegration(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not installed")
+	}
+
+	resourcesDir := t.TempDir()
+	scriptDir := filepath.Join(resourcesDir, "shell-integration", "bash")
+	assert.NilError(t, os.MkdirAll(scriptDir, 0o755))
+	assert.NilError(t, os.WriteFile(filepath.Join(scriptDir, "ghostty.bash"), []byte("export HAUNTTY_GHOSTTY_MARKER=bash-integrated\n"), 0o644))
+	t.Setenv("GHOSTTY_RESOURCES_DIR", resourcesDir)
+
+	cfg := config.Default()
+	cfg.Daemon.AutoExit = true
+	e := setup(t, cfg)
+
+	created := e.run("new", "ghostty-bash", "--", bashPath, "-c", `printf '%s|%s\n' "$HAUNTTY_GHOSTTY_MARKER" "$HAUNTTY_SESSION"; sleep 30`)
+	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"ghostty-bash\""})
+
+	wait := e.run("wait", "ghostty-bash", "bash-integrated|ghostty-bash", "-t", "5000")
+	wait.Assert(t, icmd.Expected{ExitCode: 0})
+
+	dump := e.run("dump", "ghostty-bash")
+	dump.Assert(t, icmd.Expected{ExitCode: 0, Out: "bash-integrated|ghostty-bash"})
+
+	kill := e.run("kill", "ghostty-bash")
+	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"ghostty-bash\"\n"})
+}
+
 func TestNewExistingSession(t *testing.T) {
 	cfg := config.Default()
 	cfg.Daemon.AutoExit = true
@@ -262,7 +295,7 @@ func TestNewForceOverDeadState(t *testing.T) {
 	created := e.run("new", "force-me", "--", "/bin/sh", "-c", "exit 0")
 	created.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"force-me\""})
 
-	time.Sleep(1 * time.Second)
+	e.waitForStateFile("force-me")
 
 	second := e.run("new", "force-me")
 	second.Assert(t, icmd.Expected{ExitCode: 1, Err: "create: dead session state exists"})
@@ -350,9 +383,8 @@ func TestRestoreDeadSession(t *testing.T) {
 
 	kill := e.run("kill", "restore-me")
 	kill.Assert(t, icmd.Expected{ExitCode: 0})
-	time.Sleep(500 * time.Millisecond)
 
-	dump := e.run("dump", "restore-me")
+	dump := e.waitForCommandSuccess("dump", "restore-me")
 	dump.Assert(t, icmd.Expected{ExitCode: 0})
 
 	restoreSh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
@@ -395,9 +427,8 @@ func TestRestoreDeadSessionAfterHostOutput(t *testing.T) {
 
 	kill := e.run("kill", "restore-host-output")
 	kill.Assert(t, icmd.Expected{ExitCode: 0})
-	time.Sleep(500 * time.Millisecond)
 
-	dump := e.run("dump", "restore-host-output")
+	dump := e.waitForCommandSuccess("dump", "restore-host-output")
 	dump.Assert(t, icmd.Expected{ExitCode: 0})
 
 	restoreSh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))

@@ -61,6 +61,55 @@ func TestPruneDeadSessions(t *testing.T) {
 	assert.Equal(t, pruneTwo.ExitCode, 0)
 }
 
+func TestListCorruptDeadSessionStateReportsLoadError(t *testing.T) {
+	e := setup(t, nil)
+
+	daemon := e.term([]string{htBin, "daemon"})
+	daemon.WaitFor("daemon listening")
+
+	assert.NilError(t, os.MkdirAll(filepath.Dir(e.statePath("broken-list")), 0o700))
+	assert.NilError(t, os.WriteFile(e.statePath("broken-list"), []byte("NOPE\x01"), 0o600))
+
+	list := e.run("list", "-a")
+	list.Assert(t, icmd.Expected{
+		ExitCode: 1,
+		Err:      "list: list dead sessions: load dead session state \"broken-list\": persist: bad magic 4e4f5045",
+	})
+}
+
+func TestDumpCorruptDeadSessionStateReportsLoadError(t *testing.T) {
+	e := setup(t, nil)
+
+	daemon := e.term([]string{htBin, "daemon"})
+	daemon.WaitFor("daemon listening")
+
+	assert.NilError(t, os.MkdirAll(filepath.Dir(e.statePath("broken-dump")), 0o700))
+	assert.NilError(t, os.WriteFile(e.statePath("broken-dump"), []byte("NOPE\x01"), 0o600))
+
+	dump := e.run("dump", "broken-dump")
+	dump.Assert(t, icmd.Expected{
+		ExitCode: 1,
+		Err:      "dump: load dead session state: persist: bad magic 4e4f5045",
+	})
+}
+
+func TestNewCorruptDeadSessionStateReportsLoadError(t *testing.T) {
+	cfg := config.Default()
+	e := setup(t, cfg)
+
+	daemon := e.term([]string{htBin, "daemon"})
+	daemon.WaitFor("daemon listening")
+
+	assert.NilError(t, os.MkdirAll(filepath.Dir(e.statePath("broken-new")), 0o700))
+	assert.NilError(t, os.WriteFile(e.statePath("broken-new"), []byte("NOPE\x01"), 0o600))
+
+	created := e.run("new", "broken-new")
+	created.Assert(t, icmd.Expected{
+		ExitCode: 1,
+		Err:      "create: load dead session state: persist: bad magic 4e4f5045",
+	})
+}
+
 func TestDetachKeybind(t *testing.T) {
 	cfg := config.Default()
 	cfg.Client.DetachKeybind = "ctrl+\\"

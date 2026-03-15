@@ -14,7 +14,7 @@ func TestGenerateFish(t *testing.T) {
 				Name:        "attach",
 				Aliases:     []string{"a"},
 				Help:        "Attach to a session.",
-				Positionals: []Positional{{Name: "session", DynamicTopic: "sessions"}},
+				Positionals: []Positional{{Name: "session", DynamicTopic: "live_sessions"}},
 			},
 			{
 				Name:    "list",
@@ -33,7 +33,7 @@ func TestGenerateFish(t *testing.T) {
 		"complete -c ht -f -x -l socket -d \"Socket path.\"\n" +
 		"complete -c ht -f -n '__fish_use_subcommand' -a attach -d \"Attach to a session.\"\n" +
 		"complete -c ht -f -n '__fish_use_subcommand' -a a -d \"Attach to a session.\"\n" +
-		"complete -c ht -f -n '__fish_seen_subcommand_from attach a' -a \"(ht __complete sessions)\" -d \"session\"\n" +
+		"complete -c ht -f -n '__fish_seen_subcommand_from attach a' -a \"(ht __complete live_sessions)\" -d \"session\"\n" +
 		"complete -c ht -f -n '__fish_use_subcommand' -a list -d \"List sessions.\"\n" +
 		"complete -c ht -f -n '__fish_use_subcommand' -a ls -d \"List sessions.\"\n" +
 		"complete -c ht -f -n '__fish_seen_subcommand_from list ls' -s a -l all -d \"Show dead sessions.\"\n"
@@ -49,7 +49,7 @@ func TestGenerateZsh(t *testing.T) {
 				Name:        "attach",
 				Aliases:     []string{"a"},
 				Help:        "Attach to a session.",
-				Positionals: []Positional{{Name: "session", DynamicTopic: "sessions"}},
+				Positionals: []Positional{{Name: "session", DynamicTopic: "live_sessions"}},
 			},
 		},
 	}
@@ -80,7 +80,7 @@ func TestGenerateZsh(t *testing.T) {
 		"}\n" +
 		"_ht_attach() {\n" +
 		"  _arguments \\\n" +
-		"    '1:session:($(ht __complete sessions))'\n" +
+		"    '1:session:($(ht __complete live_sessions))'\n" +
 		"}\n"
 
 	assert.Equal(t, got, expected)
@@ -88,7 +88,7 @@ func TestGenerateZsh(t *testing.T) {
 
 func TestGenerateBash(t *testing.T) {
 	spec := Spec{
-		Commands: []Command{{Name: "attach", Aliases: []string{"a"}, Positionals: []Positional{{Name: "session", DynamicTopic: "sessions"}}}},
+		Commands: []Command{{Name: "attach", Aliases: []string{"a"}, Positionals: []Positional{{Name: "session", DynamicTopic: "live_sessions"}}}},
 	}
 
 	got, err := Generate("bash", "ht", "__complete", spec)
@@ -108,7 +108,7 @@ func TestGenerateBash(t *testing.T) {
 		"  case \"$cmd\" in\n" +
 		"    attach|a)\n" +
 		"      if [[ ${COMP_CWORD} -eq 2 ]]; then\n" +
-		"        COMPREPLY=( $(compgen -W \"$(ht __complete sessions)\" -- \"$cur\") )\n" +
+		"        COMPREPLY=( $(compgen -W \"$(ht __complete live_sessions)\" -- \"$cur\") )\n" +
 		"        return 0\n" +
 		"      fi\n" +
 		"      ;;\n" +

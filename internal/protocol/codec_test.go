@@ -78,8 +78,8 @@ func TestRoundTrip(t *testing.T) {
 		{"ListWithClients", &List{IncludeClients: true}},
 		{"Kill", &Kill{Name: "doomed-session"}},
 		{"Send", &Send{Name: "target", Data: []byte{0x1b, 0x5b, 0x41}}},
-		{"SendKey", &SendKey{Name: "s", Key: 65, Mods: 3}},
-		{"Dump", &Dump{Name: "sess", Format: 2}},
+		{"SendKey", &SendKey{Name: "s", Key: KeyCode(65), Mods: KeyMods(3)}},
+		{"Dump", &Dump{Name: "sess", Format: DumpHTML}},
 		{"Prune", &Prune{}},
 		{"Kick", &Kick{Name: "foo", ClientID: "42"}},
 		{"Status", &Status{Name: "my-session"}},
@@ -115,14 +115,14 @@ func TestRoundTrip(t *testing.T) {
 		}},
 		{"Sessions", &Sessions{
 			Sessions: []Session{
-				{Name: "s1", State: "running", Cols: 80, Rows: 24, PID: 100, CreatedAt: 1700000000, CWD: "/home/user/src", Clients: []SessionClient{}},
-				{Name: "s2", State: "dead", Cols: 120, Rows: 40, PID: 200, CreatedAt: 1700000001, CWD: "", Clients: []SessionClient{}},
+				{Name: "s1", State: SessionStateRunning, Cols: 80, Rows: 24, PID: 100, CreatedAt: 1700000000, SavedAt: 0, CWD: "/home/user/src", Clients: []SessionClient{}},
+				{Name: "s2", State: SessionStateDead, Cols: 120, Rows: 40, PID: 200, CreatedAt: 0, SavedAt: 1700000001, CWD: "", Clients: []SessionClient{}},
 			},
 		}},
 		{"SessionsWithClients", &Sessions{
 			Sessions: []Session{
 				{
-					Name: "s1", State: "running", Cols: 80, Rows: 24, PID: 100, CreatedAt: 1700000000, CWD: "/tmp",
+					Name: "s1", State: "running", Cols: 80, Rows: 24, PID: 100, CreatedAt: 1700000000, SavedAt: 0, CWD: "/tmp",
 					Clients: []SessionClient{
 						{ClientID: "1", ReadOnly: false, Version: "abc123"},
 						{ClientID: "2", ReadOnly: true, Version: "def456"},
@@ -151,7 +151,7 @@ func TestRoundTrip(t *testing.T) {
 			},
 			Session: &SessionStatus{
 				Name:  "curious-fox",
-				State: "running",
+				State: SessionStateRunning,
 				Cols:  120,
 				Rows:  40,
 				PID:   12389,
@@ -221,7 +221,7 @@ func TestHandshake(t *testing.T) {
 		defer close(done)
 		serverVer, serverRev, serverErr = serverConn.AcceptHandshake()
 		if serverErr == nil {
-			serverErr = serverConn.AcceptVersion(serverVer, serverRev)
+			serverErr = serverConn.WriteVersionReply(serverVer, serverRev)
 		}
 	}()
 
@@ -253,7 +253,7 @@ func TestHandshakeVersionMismatch(t *testing.T) {
 	go func() {
 		defer close(done)
 		_, _, _ = serverConn.AcceptHandshake()
-		serverConn.AcceptVersion(0, "")
+		_ = serverConn.WriteVersionReply(0, "")
 	}()
 
 	accepted, _, err := clientConn.Handshake(ProtocolVersion, "abc123")

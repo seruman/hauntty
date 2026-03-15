@@ -1,14 +1,41 @@
 package client
 
 import (
-	"bytes"
-	"fmt"
+	"io"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 	"gotest.tools/v3/assert"
 )
+
+func TestPrepareInteractiveAttach(t *testing.T) {
+	master, slave, err := pty.Open()
+	assert.NilError(t, err)
+	defer master.Close()
+	defer slave.Close()
+
+	assert.NilError(t, pty.Setsize(slave, &pty.Winsize{Cols: 132, Rows: 47, X: 900, Y: 700}))
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("SHELL", "/bin/bash")
+	t.Setenv("COLORTERM", "truecolor")
+
+	req, err := prepareInteractiveAttach(int(slave.Fd()), []string{"COLORTERM"})
+	assert.NilError(t, err)
+	assert.Equal(t, req.Cols, uint16(132))
+	assert.Equal(t, req.Rows, uint16(47))
+	assert.Equal(t, req.Xpixel, uint16(900))
+	assert.Equal(t, req.Ypixel, uint16(700))
+	assert.DeepEqual(t, req.Env, []string{"TERM=xterm-256color", "SHELL=/bin/bash", "COLORTERM=truecolor"})
+	assert.Equal(t, req.CWD, cwd)
+	assert.Equal(t, req.Scrollback, uint32(0))
+}
 
 func TestDrainStdin(t *testing.T) {
 	t.Run("consumes pending bytes", func(t *testing.T) {
@@ -166,129 +193,36 @@ func TestReadCursorRow(t *testing.T) {
 	})
 }
 
-func TestDetachSequence(t *testing.T) {
-	// The detach sequence must use mode 1047 (not 1049) for alt screen
-	// exit to avoid DECRC cursor-restore side effects that wipe session
-	// content from the primary screen.
-	detachSeq := "\x1b[?1047;1;1000;1002;1003;1006;1004;2004;2048;2026l" +
-		"\x1b[?25h" +
-		"\x1b[<u" +
-		"\x1b[0m" +
-		"\x1b[J"
+func TestRestoreHostTerminalWritesDetachSequence(t *testing.T) {
+	master, slave, err := pty.Open()
+	assert.NilError(t, err)
+	defer master.Close()
+	defer slave.Close()
 
-	t.Run("uses mode 1047 not 1049", func(t *testing.T) {
-		assert.Assert(t, bytes.Contains([]byte(detachSeq), []byte("1047")))
-		assert.Assert(t, !bytes.Contains([]byte(detachSeq), []byte("1049")))
-	})
+	stdoutR, stdoutW, err := os.Pipe()
+	assert.NilError(t, err)
+	defer stdoutR.Close()
 
-	t.Run("resets all expected modes", func(t *testing.T) {
-		for _, mode := range []string{
-			"1047", // alt screen (safe variant)
-			"1",    // DECCKM
-			"1000", // mouse normal
-			"1002", // mouse button
-			"1003", // mouse any
-			"1006", // SGR mouse
-			"1004", // focus events
-			"2004", // bracketed paste
-			"2048", // sync output (kitty)
-			"2026", // sync output (contour)
-		} {
-			assert.Assert(t, bytes.Contains([]byte(detachSeq), []byte(mode)),
-				"detach sequence missing mode %s", mode)
-		}
-	})
+	oldStdout := os.Stdout
+	os.Stdout = stdoutW
+	defer func() {
+		os.Stdout = oldStdout
+	}()
 
-	t.Run("shows cursor", func(t *testing.T) {
-		assert.Assert(t, bytes.Contains([]byte(detachSeq), []byte("\x1b[?25h")))
-	})
+	oldState, err := term.MakeRaw(int(slave.Fd()))
+	assert.NilError(t, err)
 
-	t.Run("pops kitty keyboard", func(t *testing.T) {
-		assert.Assert(t, bytes.Contains([]byte(detachSeq), []byte("\x1b[<u")))
-	})
+	restoreHostTerminal(int(slave.Fd()), oldState, "")
+	assert.NilError(t, stdoutW.Close())
 
-	t.Run("resets SGR", func(t *testing.T) {
-		assert.Assert(t, bytes.Contains([]byte(detachSeq), []byte("\x1b[0m")))
-	})
-
-	t.Run("erases below cursor", func(t *testing.T) {
-		assert.Assert(t, bytes.HasSuffix([]byte(detachSeq), []byte("\x1b[J")))
-	})
-}
-
-func TestReattachClearSequence(t *testing.T) {
-	// The reattach clear must use per-line EL (CSI 2K), not ED (CSI J /
-	// CSI 2J) which can interact with scrollback in Ghostty.
-	rows := 24
-
-	t.Run("uses EL not ED", func(t *testing.T) {
-		var buf bytes.Buffer
-		for row := 1; row <= rows; row++ {
-			fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", row)
-		}
-		buf.WriteString("\x1b[H")
-		seq := buf.Bytes()
-
-		// Must contain EL (CSI 2K) for each row.
-		assert.Equal(t, bytes.Count(seq, []byte("\x1b[2K")), rows)
-
-		// Must NOT contain ED sequences.
-		assert.Assert(t, !bytes.Contains(seq, []byte("\x1b[J")))
-		assert.Assert(t, !bytes.Contains(seq, []byte("\x1b[2J")))
-		assert.Assert(t, !bytes.Contains(seq, []byte("\x1b[3J")))
-	})
-
-	t.Run("positions to each row", func(t *testing.T) {
-		var buf bytes.Buffer
-		for row := 1; row <= rows; row++ {
-			fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", row)
-		}
-		buf.WriteString("\x1b[H")
-		seq := buf.Bytes()
-
-		for row := 1; row <= rows; row++ {
-			cup := fmt.Sprintf("\x1b[%d;1H", row)
-			assert.Assert(t, bytes.Contains(seq, []byte(cup)),
-				"missing CUP for row %d", row)
-		}
-	})
-
-	t.Run("ends with cursor home", func(t *testing.T) {
-		var buf bytes.Buffer
-		for row := 1; row <= rows; row++ {
-			fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", row)
-		}
-		buf.WriteString("\x1b[H")
-		seq := buf.Bytes()
-
-		assert.Assert(t, bytes.HasSuffix(seq, []byte("\x1b[H")))
-	})
-}
-
-func TestReattachScrollCount(t *testing.T) {
-	// The scroll-into-scrollback step must scroll exactly cursorRow
-	// lines (from DSR), not the full terminal height. This avoids
-	// blank-line gaps in scrollback.
-	t.Run("scroll count matches cursor row", func(t *testing.T) {
-		cursorRow := 10
-		termRows := 58
-
-		scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, cursorRow)...)
-
-		// Must have exactly cursorRow newlines, not termRows.
-		nlCount := bytes.Count(scroll, []byte{'\n'})
-		assert.Equal(t, nlCount, cursorRow)
-		assert.Assert(t, nlCount < termRows)
-	})
-
-	t.Run("fallback scrolls full height", func(t *testing.T) {
-		termRows := 58
-
-		scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, termRows)...)
-
-		nlCount := bytes.Count(scroll, []byte{'\n'})
-		assert.Equal(t, nlCount, termRows)
-	})
+	out, err := io.ReadAll(stdoutR)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, out, []byte(
+		"\x1b[?1047;1;1000;1002;1003;1006;1004;2004;2048;2026l"+
+			"\x1b[?25h"+
+			"\x1b[<u"+
+			"\x1b[0m"+
+			"\x1b[J"))
 }
 
 func makePipe() (r, w int, err error) {

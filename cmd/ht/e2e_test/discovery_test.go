@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"code.selman.me/hauntty/client"
+	"code.selman.me/hauntty/internal/client"
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
 	"code.selman.me/hauntty/internal/termtest"
@@ -57,7 +57,7 @@ func TestListSessionsFiltering(t *testing.T) {
 		rows := make([][]string, len(lines))
 		for i, line := range lines {
 			rows[i] = splitCols.Split(strings.TrimRight(line, " "), -1)
-			if len(rows[i]) == 5 {
+			if len(rows[i]) == 6 {
 				rows[i] = append(rows[i][:3], append([]string{""}, rows[i][3:]...)...)
 			}
 		}
@@ -83,27 +83,32 @@ func TestListSessionsFiltering(t *testing.T) {
 		if s.CreatedAt != 0 {
 			created = time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
 		}
+		saved := "-"
+		if s.SavedAt != 0 {
+			saved = time.Unix(int64(s.SavedAt), 0).Format("2006-01-02 15:04:05")
+		}
 		return []string{
 			s.Name,
-			s.State,
+			string(s.State),
 			fmt.Sprintf("%dx%d", s.Cols, s.Rows),
 			cwd,
 			pid,
 			created,
+			saved,
 		}
 	}
 
 	list := e.run("list")
 	list.Assert(t, icmd.Expected{ExitCode: 0})
 	assert.DeepEqual(t, parseRows(list.Stdout()), [][]string{
-		{"NAME", "STATE", "SIZE", "CWD", "PID", "CREATED"},
+		{"NAME", "STATE", "SIZE", "CWD", "PID", "CREATED", "SAVED"},
 		formatRow(rowsByName["alive"]),
 	})
 
 	listAll := e.run("list", "-a")
 	listAll.Assert(t, icmd.Expected{ExitCode: 0})
 	assert.DeepEqual(t, parseRows(listAll.Stdout()), [][]string{
-		{"NAME", "STATE", "SIZE", "CWD", "PID", "CREATED"},
+		{"NAME", "STATE", "SIZE", "CWD", "PID", "CREATED", "SAVED"},
 		formatRow(rowsByName["alive"]),
 		formatRow(rowsByName["dead"]),
 	})

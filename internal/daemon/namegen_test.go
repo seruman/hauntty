@@ -26,6 +26,22 @@ func TestGenerateUniqueName_AvoidsCollisions(t *testing.T) {
 	}
 }
 
+func TestGenerateUniqueNameFallsBackToOnlyFreeCombination(t *testing.T) {
+	oldAdjectives := adjectives
+	oldNouns := nouns
+	adjectives = []string{"alpha"}
+	nouns = []string{"beta", "gamma"}
+	defer func() {
+		adjectives = oldAdjectives
+		nouns = oldNouns
+	}()
+
+	existing := map[string]bool{"alpha-beta": true}
+
+	name := generateUniqueName(existing)
+	assert.Equal(t, name, "alpha-gamma")
+}
+
 func TestGenerateUniqueName_ExhaustedSpace(t *testing.T) {
 	existing := make(map[string]bool, len(adjectives)*len(nouns))
 	for _, adj := range adjectives {

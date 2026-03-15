@@ -36,6 +36,19 @@ func generateUniqueName(existing map[string]bool) string {
 			return name
 		}
 	}
+	for _, adj := range adjectives {
+		for _, noun := range nouns {
+			name := adj + "-" + noun
+			if !existing[name] {
+				return name
+			}
+		}
+	}
 	name := generateName()
-	return fmt.Sprintf("%s-%d", name, rand.IntN(1000))
+	for suffix := 0; ; suffix++ {
+		candidate := fmt.Sprintf("%s-%d", name, suffix)
+		if !existing[candidate] {
+			return candidate
+		}
+	}
 }

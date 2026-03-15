@@ -5,19 +5,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
 	hauntty "code.selman.me/hauntty"
-	"code.selman.me/hauntty/client"
+	"code.selman.me/hauntty/internal/client"
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/daemon"
 	"code.selman.me/hauntty/internal/protocol"
@@ -27,24 +28,24 @@ import (
 )
 
 type CLI struct {
-	Version    kong.VersionFlag `help:"Print version."`
-	Socket     string           `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
-	Attach     AttachCmd        `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
-	New        NewCmd           `cmd:"" help:"Create a session without attaching."`
-	Restore    RestoreCmd       `cmd:"" help:"Restore a dead session from saved state."`
-	List       ListCmd          `cmd:"" aliases:"ls" help:"List sessions."`
-	Kill       KillCmd          `cmd:"" help:"Kill a session."`
-	Send       SendCmd          `cmd:"" help:"Send input to a session."`
-	Dump       DumpCmd          `cmd:"" help:"Dump session contents."`
-	Kick       KickCmd          `cmd:"" help:"Disconnect a specific attached client."`
-	Wait       WaitCmd          `cmd:"" help:"Wait for session output to match a pattern."`
-	Status     StatusCmd        `cmd:"" aliases:"st" help:"Show daemon and session status."`
-	Prune      PruneCmd         `cmd:"" help:"Delete dead session state files."`
-	Init       InitCmd          `cmd:"" help:"Create default config file."`
-	Config     ConfigCmd        `cmd:"" help:"Print effective configuration."`
-	Daemon     DaemonCmd        `cmd:"" help:"Start daemon in foreground."`
-	Completion CompletionCmd    `cmd:"" help:"Print shell completion setup instructions."`
-	Complete   CompleteCmd      `cmd:"" hidden:"" name:"__complete" help:"Internal completion data provider."`
+	Version    kong.VersionFlag  `help:"Print version."`
+	Socket     string            `help:"Unix socket path override." env:"HAUNTTY_SOCKET"`
+	Attach     AttachCmd         `cmd:"" aliases:"a" help:"Attach to a session (create if needed)."`
+	New        NewCmd            `cmd:"" help:"Create a session without attaching."`
+	Restore    RestoreCmd        `cmd:"" help:"Restore a dead session from saved state."`
+	List       ListCmd           `cmd:"" aliases:"ls" help:"List sessions."`
+	Kill       KillCmd           `cmd:"" help:"Kill a session."`
+	Send       SendCmd           `cmd:"" help:"Send input to a session."`
+	Dump       DumpCmd           `cmd:"" help:"Dump session contents."`
+	Kick       KickCmd           `cmd:"" help:"Disconnect a specific attached client."`
+	Wait       WaitCmd           `cmd:"" help:"Wait for session output to match a pattern."`
+	Status     StatusCmd         `cmd:"" aliases:"st" help:"Show daemon and session status."`
+	Prune      PruneCmd          `cmd:"" help:"Delete dead session state files."`
+	Init       InitCmd           `cmd:"" help:"Create default config file."`
+	Config     ConfigCmd         `cmd:"" help:"Print current configuration."`
+	Daemon     DaemonCmd         `cmd:"" help:"Start daemon in foreground."`
+	Completion CompletionCmd     `cmd:"" help:"Print shell completion setup instructions."`
+	Complete   CompletionDataCmd `cmd:"" hidden:"" name:"__complete" help:"Internal completion data provider."`
 }
 
 type AttachCmd struct {
@@ -79,9 +80,15 @@ func (cmd *AttachCmd) Run(cfg *config.Config) error {
 	}
 	defer c.Close()
 
-	command := resolveCommand(cmd.Command, cfg)
+	command := resolveDefaultCommand(cmd.Command, cfg)
 
-	return c.RunAttach(cmd.Name, command, dk, cfg.Client.ForwardEnv, cmd.ReadOnly, false)
+	return c.RunAttach(client.AttachOpts{
+		Name:       cmd.Name,
+		Command:    command,
+		DetachKey:  dk,
+		ForwardEnv: cfg.Client.ForwardEnv,
+		ReadOnly:   cmd.ReadOnly,
+	})
 }
 
 type NewCmd struct {
@@ -106,7 +113,14 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 	}
 
 	env := client.CollectForwardedEnv(cfg.Client.ForwardEnv)
-	created, err := c.Create(cmd.Name, resolveCommand(cmd.Command, cfg), env, cwd, 0, cmd.Force)
+	created, err := c.Create(&protocol.Create{
+		Name:       cmd.Name,
+		Command:    resolveDefaultCommand(cmd.Command, cfg),
+		Env:        env,
+		CWD:        cwd,
+		Scrollback: 0,
+		Force:      cmd.Force,
+	})
 	if err != nil {
 		return err
 	}
@@ -137,36 +151,59 @@ func (cmd *ListCmd) Run(cfg *config.Config) error {
 		home = ""
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATE\tSIZE\tCWD\tPID\tCREATED")
-	n := 0
-	for _, s := range sessions.Sessions {
-		if !cmd.All && s.State == "dead" {
+	rows := sessionListRows(sessions.Sessions, cmd.All, home)
+	if len(rows) == 1 {
+		fmt.Fprintln(os.Stderr, "no sessions")
+		return nil
+	}
+	return writeSessionRows(os.Stdout, rows)
+}
+
+func sessionListRows(sessions []protocol.Session, showAll bool, home string) [][]string {
+	rows := [][]string{{"NAME", "STATE", "SIZE", "CWD", "PID", "CREATED", "SAVED"}}
+	for _, s := range sessions {
+		if !showAll && s.State == protocol.SessionStateDead {
 			continue
 		}
-		n++
 		cwd := s.CWD
 		if home != "" && strings.HasPrefix(cwd, home) {
 			cwd = "~" + cwd[len(home):]
 		}
-		if s.PID == 0 {
-			created := "-"
-			if s.CreatedAt != 0 {
-				created = time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
-			}
-			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%s\t-\t%s\n", s.Name, s.State, s.Cols, s.Rows, cwd, created)
-		} else {
-			created := time.Unix(int64(s.CreatedAt), 0).Format("2006-01-02 15:04:05")
-			fmt.Fprintf(w, "%s\t%s\t%dx%d\t%s\t%d\t%s\n",
-				s.Name, s.State, s.Cols, s.Rows, cwd, s.PID, created)
+		rows = append(rows, []string{
+			s.Name,
+			string(s.State),
+			fmt.Sprintf("%dx%d", s.Cols, s.Rows),
+			cwd,
+			formatSessionPID(s.PID),
+			formatSessionTimestamp(s.CreatedAt),
+			formatSessionTimestamp(s.SavedAt),
+		})
+	}
+	return rows
+}
+
+func writeSessionRows(w io.Writer, rows [][]string) error {
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	for _, row := range rows {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row[0], row[1], row[2], row[3], row[4], row[5], row[6]); err != nil {
+			return err
 		}
 	}
-	if n == 0 {
-		fmt.Fprintln(os.Stderr, "no sessions")
-	} else {
-		w.Flush()
+	return tw.Flush()
+}
+
+func formatSessionPID(pid uint32) string {
+	if pid == 0 {
+		return "-"
 	}
-	return nil
+	return strconv.FormatUint(uint64(pid), 10)
+}
+
+func formatSessionTimestamp(ts uint32) string {
+	if ts == 0 {
+		return "-"
+	}
+	return time.Unix(int64(ts), 0).Format("2006-01-02 15:04:05")
 }
 
 type KillCmd struct {
@@ -236,19 +273,7 @@ func (cmd *DumpCmd) Run(cfg *config.Config) error {
 		}
 	}
 
-	var format uint8
-	switch cmd.Format {
-	case "vt":
-		format = protocol.DumpVT
-	case "html":
-		format = protocol.DumpHTML
-	}
-	if cmd.Join {
-		format |= protocol.DumpFlagUnwrap
-	}
-	if cmd.Scrollback {
-		format |= protocol.DumpFlagScrollback
-	}
+	format := dumpRequestFormat(cmd.Format, cmd.Join, cmd.Scrollback)
 
 	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
@@ -262,6 +287,23 @@ func (cmd *DumpCmd) Run(cfg *config.Config) error {
 	}
 	_, err = os.Stdout.Write(data)
 	return err
+}
+
+func dumpRequestFormat(format string, join, scrollback bool) protocol.DumpFormat {
+	var value protocol.DumpFormat
+	switch format {
+	case "vt":
+		value = protocol.DumpVT
+	case "html":
+		value = protocol.DumpHTML
+	}
+	if join {
+		value |= protocol.DumpFlagUnwrap
+	}
+	if scrollback {
+		value |= protocol.DumpFlagScrollback
+	}
+	return value
 }
 
 type RestoreCmd struct {
@@ -292,7 +334,13 @@ func (cmd *RestoreCmd) Run(cfg *config.Config) error {
 	}
 	defer c.Close()
 
-	return c.RunAttach(cmd.Name, nil, dk, cfg.Client.ForwardEnv, cmd.ReadOnly, true)
+	return c.RunAttach(client.AttachOpts{
+		Name:       cmd.Name,
+		DetachKey:  dk,
+		ForwardEnv: cfg.Client.ForwardEnv,
+		ReadOnly:   cmd.ReadOnly,
+		Restore:    true,
+	})
 }
 
 type KickCmd struct {
@@ -379,20 +427,6 @@ func formatUptime(seconds uint32) string {
 	return fmt.Sprintf("%ds", s)
 }
 
-func resolveCommand(command []string, cfg *config.Config) []string {
-	if len(command) > 0 {
-		return command
-	}
-	if cfg.Session.DefaultCommand == "" {
-		return nil
-	}
-	return strings.Fields(cfg.Session.DefaultCommand)
-}
-
-func isInteractiveAttachTTY() bool {
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
-}
-
 type WaitCmd struct {
 	Name     string `arg:"" help:"Session name."`
 	Pattern  string `arg:"" help:"Pattern to match."`
@@ -403,20 +437,14 @@ type WaitCmd struct {
 }
 
 func (cmd *WaitCmd) Run(cfg *config.Config) error {
-	var match func(string) bool
-	if cmd.Regex {
-		re, err := regexp.Compile(cmd.Pattern)
-		if err != nil {
-			return fmt.Errorf("invalid regex: %w", err)
-		}
-		match = re.MatchString
-	} else {
-		match = func(s string) bool { return strings.Contains(s, cmd.Pattern) }
+	match, err := compileWaitMatcher(cmd.Pattern, cmd.Regex)
+	if err != nil {
+		return err
 	}
 
 	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
-		return &commandExitError{code: 2}
+		return &commandExitError{code: 2, stderr: fmt.Sprintf("error: %v\n", err)}
 	}
 	defer c.Close()
 
@@ -427,15 +455,7 @@ func (cmd *WaitCmd) Run(cfg *config.Config) error {
 			return &commandExitError{code: 2, stderr: fmt.Sprintf("error: %v\n", err)}
 		}
 
-		content := string(data)
-		if cmd.Row >= 0 {
-			lines := strings.Split(content, "\n")
-			if cmd.Row < len(lines) {
-				content = lines[cmd.Row]
-			} else {
-				content = ""
-			}
-		}
+		content := waitContent(string(data), cmd.Row)
 
 		if match(content) {
 			return nil
@@ -447,6 +467,28 @@ func (cmd *WaitCmd) Run(cfg *config.Config) error {
 
 		time.Sleep(time.Duration(cmd.Interval) * time.Millisecond)
 	}
+}
+
+func compileWaitMatcher(pattern string, regex bool) (func(string) bool, error) {
+	if regex {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex: %w", err)
+		}
+		return re.MatchString, nil
+	}
+	return func(s string) bool { return strings.Contains(s, pattern) }, nil
+}
+
+func waitContent(content string, row int) string {
+	if row < 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	if row >= len(lines) {
+		return ""
+	}
+	return lines[row]
 }
 
 type PruneCmd struct{}
@@ -506,33 +548,6 @@ func (cmd *ConfigCmd) Run(cfg *config.Config) error {
 	return toml.NewEncoder(os.Stdout).Encode(cfg)
 }
 
-type CompleteCmd struct {
-	Topic string `arg:"" help:"Completion topic." enum:"sessions"`
-}
-
-func (cmd *CompleteCmd) Run(cfg *config.Config) error {
-	switch cmd.Topic {
-	case "sessions":
-		c, err := client.Connect(cfg.Daemon.SocketPath)
-		if err != nil {
-			return nil
-		}
-		defer c.Close()
-
-		sessions, err := c.List(false)
-		if err != nil {
-			return nil
-		}
-
-		for _, s := range sessions.Sessions {
-			fmt.Fprintln(os.Stdout, s.Name)
-		}
-		return nil
-	default:
-		return nil
-	}
-}
-
 type DaemonCmd struct {
 	AutoExit bool   `help:"Exit when last session dies."`
 	Detach   bool   `short:"d" help:"Run daemon in background and exit."`
@@ -566,6 +581,20 @@ func (cmd *DaemonCmd) Run(cfg *config.Config) error {
 	}
 
 	return srv.Listen()
+}
+
+func resolveDefaultCommand(command []string, cfg *config.Config) []string {
+	if len(command) > 0 {
+		return command
+	}
+	if cfg.Session.DefaultCommand == "" {
+		return nil
+	}
+	return strings.Fields(cfg.Session.DefaultCommand)
+}
+
+func isInteractiveAttachTTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 type exitCoder interface {
@@ -654,7 +683,11 @@ func daemonStartArgs(socketPath string, autoExit bool) []string {
 
 func ensureDaemonDetached(socketPath string, autoExit bool, logPath string) error {
 	sock := cmp.Or(socketPath, config.SocketPath())
-	if client.DaemonRunning(sock) {
+	running, err := client.ProbeDaemon(sock)
+	if err != nil {
+		return err
+	}
+	if running {
 		return nil
 	}
 
@@ -668,6 +701,7 @@ func ensureDaemonDetached(socketPath string, autoExit bool, logPath string) erro
 		return err
 	}
 	defer logFile.Close()
+	logFilePath := logFile.Name()
 	tempLog := logPath == ""
 	cleanupLogOnError := tempLog
 	defer func() {
@@ -684,27 +718,88 @@ func ensureDaemonDetached(socketPath string, autoExit bool, logPath string) erro
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
+	released := false
+	reaped := false
+	defer func() {
+		if released || reaped {
+			return
+		}
+		_ = cmd.Process.Release()
+	}()
+
 	if tempLog {
 		finalPath := filepath.Join(filepath.Dir(sock), fmt.Sprintf("hauntty-server-%d.log", cmd.Process.Pid))
 		if err := os.Rename(logFile.Name(), finalPath); err != nil {
 			return fmt.Errorf("rename daemon log file: %w", err)
 		}
+		logFilePath = finalPath
 	}
 	cleanupLogOnError = false
-	if err := cmd.Process.Release(); err != nil {
-		return fmt.Errorf("release daemon process: %w", err)
-	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		conn, err := net.Dial("unix", sock)
-		if err == nil {
-			conn.Close()
+		running, err := client.ProbeDaemon(sock)
+		if err != nil {
+			return daemonStartupError(sock, logFilePath, err)
+		}
+		if running {
+			if err := cmd.Process.Release(); err != nil {
+				return fmt.Errorf("release daemon process: %w", err)
+			}
+			released = true
 			return nil
+		}
+
+		exited, err := daemonProcessExited(cmd.Process.Pid)
+		if err != nil {
+			if exited {
+				reaped = true
+			}
+			return daemonStartupError(sock, logFilePath, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for daemon at %s", sock)
+	return daemonStartupTimeoutError(sock, logFilePath)
+}
+
+func daemonProcessExited(pid int) (bool, error) {
+	var status syscall.WaitStatus
+	waited, err := syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
+	if err != nil {
+		if errors.Is(err, syscall.ECHILD) {
+			return false, nil
+		}
+		return false, fmt.Errorf("wait daemon process: %w", err)
+	}
+	if waited == 0 {
+		return false, nil
+	}
+	return true, daemonProcessExitError(status)
+}
+
+func daemonProcessExitError(status syscall.WaitStatus) error {
+	switch {
+	case status.Exited():
+		return fmt.Errorf("daemon exited before ready with status %d", status.ExitStatus())
+	case status.Signaled():
+		return fmt.Errorf("daemon exited before ready from signal %s", status.Signal())
+	default:
+		return fmt.Errorf("daemon exited before ready")
+	}
+}
+
+func daemonStartupError(socketPath string, logPath string, cause error) error {
+	if logPath == "" {
+		return fmt.Errorf("daemon failed before ready at %s: %w", socketPath, cause)
+	}
+	return fmt.Errorf("daemon failed before ready at %s: %w (see %s)", socketPath, cause, logPath)
+}
+
+func daemonStartupTimeoutError(socketPath string, logPath string) error {
+	if logPath == "" {
+		return fmt.Errorf("timed out waiting for daemon at %s", socketPath)
+	}
+	return fmt.Errorf("timed out waiting for daemon at %s (see %s)", socketPath, logPath)
 }
 
 func openDaemonLogFile(sock string, logPath string) (*os.File, error) {

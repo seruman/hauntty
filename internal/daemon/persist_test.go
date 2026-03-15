@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 func TestEncodeDecodeRoundtrip(t *testing.T) {
 	saved := time.Unix(1700000000, 0)
-	state := &SessionState{
+	state := &sessionState{
 		Cols:        80,
 		Rows:        24,
 		CursorRow:   5,
@@ -31,7 +32,7 @@ func TestEncodeDecodeRoundtrip(t *testing.T) {
 
 func TestEncodeDecodeAltScreen(t *testing.T) {
 	saved := time.Unix(1700000000, 0)
-	state := &SessionState{
+	state := &sessionState{
 		Cols:        120,
 		Rows:        40,
 		CursorRow:   0,
@@ -67,7 +68,7 @@ func TestDecodeStateUnsupportedVersion(t *testing.T) {
 
 func TestEncodeStateFormat(t *testing.T) {
 	saved := time.Unix(0x65655E40, 0)
-	state := &SessionState{
+	state := &sessionState{
 		Cols:        80,
 		Rows:        24,
 		CursorRow:   0,
@@ -95,6 +96,40 @@ func TestEncodeStateFormat(t *testing.T) {
 	assert.DeepEqual(t, data, expected)
 }
 
+func TestSaveAllWithAggregatesErrors(t *testing.T) {
+	p := &persister{sessions: func() map[string]*Session {
+		return map[string]*Session{
+			"beta":  nil,
+			"alpha": nil,
+		}
+	}}
+
+	err := p.saveAllWith(func(name string, _ *Session) error {
+		switch name {
+		case "alpha":
+			return errors.New("alpha failed")
+		case "beta":
+			return errors.New("beta failed")
+		default:
+			return nil
+		}
+	})
+
+	assert.Error(t, err, "alpha: alpha failed\nbeta: beta failed")
+}
+
+func TestSaveAllWithNoErrors(t *testing.T) {
+	p := &persister{sessions: func() map[string]*Session {
+		return map[string]*Session{"alpha": nil}
+	}}
+
+	err := p.saveAllWith(func(_ string, _ *Session) error {
+		return nil
+	})
+
+	assert.NilError(t, err)
+}
+
 func TestCleanStaleTmp(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", dir)
@@ -105,7 +140,7 @@ func TestCleanStaleTmp(t *testing.T) {
 	assert.NilError(t, os.WriteFile(filepath.Join(sessionDir, "foo.state.tmp"), []byte("stale"), 0o600))
 	assert.NilError(t, os.WriteFile(filepath.Join(sessionDir, "bar.state"), []byte("keep"), 0o600))
 
-	CleanStaleTmp()
+	cleanStaleTmp()
 
 	entries, err := os.ReadDir(sessionDir)
 	assert.NilError(t, err)
@@ -115,6 +150,6 @@ func TestCleanStaleTmp(t *testing.T) {
 
 func TestLoadStateMissing(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	_, err := LoadState("nonexistent")
+	_, err := loadState("nonexistent")
 	assert.Assert(t, os.IsNotExist(err))
 }

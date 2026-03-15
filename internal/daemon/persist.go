@@ -3,10 +3,12 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,7 +23,7 @@ var stateMagic = [4]byte{'H', 'T', 'S', 'T'}
 
 const stateVersion = 1
 
-type SessionState struct {
+type sessionState struct {
 	Cols        uint16
 	Rows        uint16
 	CursorRow   uint32
@@ -31,7 +33,7 @@ type SessionState struct {
 	VT          []byte
 }
 
-type Persister struct {
+type persister struct {
 	sessions func() map[string]*Session
 	dir      string
 	interval time.Duration
@@ -39,9 +41,9 @@ type Persister struct {
 	cancel   context.CancelFunc
 }
 
-func NewPersister(sessions func() map[string]*Session, interval time.Duration) *Persister {
+func newPersister(sessions func() map[string]*Session, interval time.Duration) *persister {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Persister{
+	return &persister{
 		sessions: sessions,
 		dir:      stateDir(),
 		interval: interval,
@@ -50,15 +52,15 @@ func NewPersister(sessions func() map[string]*Session, interval time.Duration) *
 	}
 }
 
-func (p *Persister) Start() {
+func (p *persister) start() {
 	go p.loop()
 }
 
-func (p *Persister) Stop() {
+func (p *persister) stop() {
 	p.cancel()
 }
 
-func (p *Persister) loop() {
+func (p *persister) loop() {
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 
@@ -67,47 +69,69 @@ func (p *Persister) loop() {
 		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
-			p.saveAll()
+			if err := p.saveAll(); err != nil {
+				slog.Warn("persist: periodic save failed", "err", err)
+			}
 		}
 	}
 }
 
-func (p *Persister) saveAll() {
+func (p *persister) saveAll() error {
+	return p.saveAllWith(p.saveSession)
+}
+
+func (p *persister) saveAllWith(save func(name string, s *Session) error) error {
 	sessions := p.sessions()
-	for name, s := range sessions {
-		if err := p.SaveSession(name, s); err != nil {
-			slog.Debug("persist: save failed", "session", name, "err", err)
+	names := make([]string, 0, len(sessions))
+	for name := range sessions {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var errs []error
+	for _, name := range names {
+		if err := save(name, sessions[name]); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
-func (p *Persister) SaveSession(name string, s *Session) error {
+func (p *persister) saveSession(name string, s *Session) error {
 	dump, err := s.dumpScreen(p.ctx, libghostty.DumpVTFull)
 	if err != nil {
 		return fmt.Errorf("persist: dump screen: %w", err)
 	}
 
 	cols, rows := s.size()
-	state := &SessionState{
+	state := &sessionState{
 		Cols:        cols,
 		Rows:        rows,
 		CursorRow:   dump.CursorRow,
 		CursorCol:   dump.CursorCol,
 		IsAltScreen: dump.IsAltScreen,
 		SavedAt:     time.Now(),
-		VT:          dump.VT,
+		VT:          dump.Data,
 	}
 
+	return writeStateInDir(p.dir, name, state)
+}
+
+func writeState(name string, state *sessionState) error {
+	return writeStateInDir(stateDir(), name, state)
+}
+
+func writeStateInDir(dir string, name string, state *sessionState) error {
 	data, err := encodeState(state)
 	if err != nil {
 		return fmt.Errorf("persist: encode state: %w", err)
 	}
 
-	if err := os.MkdirAll(p.dir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("persist: create dir: %w", err)
 	}
 
-	path := filepath.Join(p.dir, name+".state")
+	path := filepath.Join(dir, name+".state")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("persist: write tmp: %w", err)
@@ -119,7 +143,7 @@ func (p *Persister) SaveSession(name string, s *Session) error {
 	return nil
 }
 
-func encodeState(s *SessionState) ([]byte, error) {
+func encodeState(s *sessionState) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := protocol.NewEncoder(&buf)
 
@@ -151,7 +175,7 @@ func encodeState(s *SessionState) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func LoadState(name string) (*SessionState, error) {
+func loadState(name string) (*sessionState, error) {
 	path := filepath.Join(stateDir(), name+".state")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -160,7 +184,7 @@ func LoadState(name string) (*SessionState, error) {
 	return decodeState(data)
 }
 
-func decodeState(data []byte) (*SessionState, error) {
+func decodeState(data []byte) (*sessionState, error) {
 	if len(data) < 4 {
 		return nil, fmt.Errorf("persist: state file too short")
 	}
@@ -207,7 +231,7 @@ func decodeState(data []byte) (*SessionState, error) {
 		return nil, fmt.Errorf("persist: read vt_data: %w", err)
 	}
 
-	return &SessionState{
+	return &sessionState{
 		Cols:        cols,
 		Rows:        rows,
 		CursorRow:   cursorRow,
@@ -218,7 +242,7 @@ func decodeState(data []byte) (*SessionState, error) {
 	}, nil
 }
 
-func ListDeadSessions(running map[string]bool) ([]string, error) {
+func listDeadSessions(running map[string]bool) ([]string, error) {
 	dir := stateDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -241,7 +265,7 @@ func ListDeadSessions(running map[string]bool) ([]string, error) {
 	return dead, nil
 }
 
-func CleanState(name string) error {
+func cleanState(name string) error {
 	path := filepath.Join(stateDir(), name+".state")
 	err := os.Remove(path)
 	if os.IsNotExist(err) {
@@ -250,8 +274,8 @@ func CleanState(name string) error {
 	return err
 }
 
-// CleanStaleTmp removes leftover .state.tmp files from interrupted writes.
-func CleanStaleTmp() {
+// cleanStaleTmp removes leftover .state.tmp files from interrupted writes.
+func cleanStaleTmp() {
 	dir := stateDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {

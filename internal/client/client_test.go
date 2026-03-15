@@ -36,7 +36,7 @@ func TestConnectAcceptsRevisionMismatchWhenProtocolMatches(t *testing.T) {
 			done <- err
 			return
 		}
-		err = pc.AcceptVersion(clientVer, "different-revision")
+		err = pc.WriteVersionReply(clientVer, "different-revision")
 		done <- err
 	}()
 

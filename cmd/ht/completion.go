@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"code.selman.me/hauntty/internal/client"
 	"code.selman.me/hauntty/internal/completion"
+	"code.selman.me/hauntty/internal/config"
+	"code.selman.me/hauntty/internal/protocol"
 	"github.com/alecthomas/kong"
 )
 
@@ -51,6 +54,68 @@ func (cmd *CompletionCmd) Run(ctx *kong.Context) error {
 	return nil
 }
 
+type CompletionDataCmd struct {
+	Topic string `arg:"" help:"Completion topic." enum:"sessions,live_sessions,dead_sessions,dumpable_sessions"`
+}
+
+func (cmd *CompletionDataCmd) Run(cfg *config.Config) error {
+	c, err := client.Connect(cfg.Daemon.SocketPath)
+	if err != nil {
+		// Daemon not reachable; return no completions instead of an error
+		// so the shell tab-complete UX degrades gracefully.
+		return nil
+	}
+	defer c.Close()
+
+	sessions, err := c.List(false)
+	if err != nil {
+		// Same graceful degradation: no completions rather than a shell error.
+		return nil
+	}
+
+	for _, name := range completionTopicNames(cmd.Topic, sessions.Sessions) {
+		fmt.Fprintln(os.Stdout, name)
+	}
+	return nil
+}
+
+func completionDynamicTopics() map[string]string {
+	return map[string]string{
+		"attach":  "live_sessions",
+		"dump":    "dumpable_sessions",
+		"kill":    "live_sessions",
+		"kick":    "live_sessions",
+		"restore": "dead_sessions",
+		"send":    "live_sessions",
+		"status":  "sessions",
+		"wait":    "dumpable_sessions",
+	}
+}
+
+func completionTopicNames(topic string, sessions []protocol.Session) []string {
+	names := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if !includeCompletionSession(topic, session) {
+			continue
+		}
+		names = append(names, session.Name)
+	}
+	return names
+}
+
+func includeCompletionSession(topic string, session protocol.Session) bool {
+	switch topic {
+	case "live_sessions":
+		return session.State == protocol.SessionStateRunning
+	case "dead_sessions":
+		return session.State == protocol.SessionStateDead
+	case "dumpable_sessions", "sessions":
+		return true
+	default:
+		return false
+	}
+}
+
 func resolveCompletionShell(shell string) (string, error) {
 	if shell == "" {
 		shell = filepath.Base(os.Getenv("SHELL"))
@@ -78,14 +143,7 @@ func completionScript(shell string, node *kong.Node) ([]byte, error) {
 	if node == nil {
 		return nil, fmt.Errorf("nil command tree")
 	}
-	dynamic := map[string]string{
-		"attach": "sessions",
-		"kill":   "sessions",
-		"send":   "sessions",
-		"dump":   "sessions",
-		"wait":   "sessions",
-	}
-	spec := completion.BuildSpec(node, dynamic)
+	spec := completion.BuildSpec(node, completionDynamicTopics())
 	script, err := completion.Generate(shell, node.Name, "__complete", spec)
 	if err != nil {
 		return nil, err
