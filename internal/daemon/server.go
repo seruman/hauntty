@@ -26,12 +26,14 @@ import (
 type Server struct {
 	socketPath        string
 	pidPath           string
+	lockPath          string
 	sessions          map[string]*Session
 	mu                sync.RWMutex
 	wasmRT            *libghostty.Runtime
 	ctx               context.Context
 	cancel            context.CancelFunc
 	listener          net.Listener
+	lockFile          *os.File
 	persister         *persister
 	defaultScrollback uint32
 	resizePolicy      config.ResizePolicy
@@ -55,6 +57,7 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy config.Resi
 	s := &Server{
 		socketPath:        sock,
 		pidPath:           filepath.Join(filepath.Dir(sock), "hauntty.pid"),
+		lockPath:          filepath.Join(filepath.Dir(sock), "hauntty.lock"),
 		sessions:          make(map[string]*Session),
 		wasmRT:            rt,
 		ctx:               ctx,
@@ -80,6 +83,16 @@ func (s *Server) Listen() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create socket dir: %w", err)
 	}
+
+	if err := s.acquireLock(); err != nil {
+		return err
+	}
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			s.releaseLock()
+		}
+	}()
 
 	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("remove stale socket", "path", s.socketPath, "err", err)
@@ -126,6 +139,33 @@ func (s *Server) Listen() error {
 		}
 		go s.handleConn(conn)
 	}
+}
+
+func (s *Server) acquireLock() error {
+	f, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("daemon: open lock file: %w", err)
+	}
+
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return fmt.Errorf("daemon already running")
+		}
+		return fmt.Errorf("daemon: acquire lock: %w", err)
+	}
+
+	s.lockFile = f
+	return nil
+}
+
+func (s *Server) releaseLock() {
+	if s.lockFile == nil {
+		return
+	}
+	_ = unix.Flock(int(s.lockFile.Fd()), unix.LOCK_UN)
+	_ = s.lockFile.Close()
+	s.lockFile = nil
 }
 
 func (s *Server) handleConn(netConn net.Conn) {
@@ -267,6 +307,7 @@ func (s *Server) shutdown() {
 	if s.listener != nil {
 		s.listener.Close()
 	}
+	s.releaseLock()
 
 	s.mu.Lock()
 	for _, sess := range s.sessions {
