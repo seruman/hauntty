@@ -256,6 +256,39 @@ func TestBroadcastOutputEvictsSlowClients(t *testing.T) {
 	assert.DeepEqual(t, got, msg)
 }
 
+func TestBroadcastOutputAllowsTransientBackpressure(t *testing.T) {
+	msg := &protocol.Output{Data: []byte("hello")}
+
+	var closeCount atomic.Int32
+	slow := &sessionClient{
+		id: "slow",
+		closeConn: func() error {
+			closeCount.Add(1)
+			return nil
+		},
+		outCh: make(chan protocol.Message, 1),
+	}
+	busy := &protocol.Output{Data: []byte("busy")}
+	slow.outCh <- busy
+
+	drainDone := make(chan struct{})
+	go func() {
+		time.Sleep(slowClientGracePeriod / 4)
+		<-slow.outCh
+		close(drainDone)
+	}()
+
+	clients := broadcastOutput([]*sessionClient{slow}, "demo", msg)
+	<-drainDone
+
+	assert.Equal(t, len(clients), 1)
+	assert.Assert(t, clients[0] == slow)
+	assert.Equal(t, closeCount.Load(), int32(0))
+
+	got := <-slow.outCh
+	assert.DeepEqual(t, got, msg)
+}
+
 func TestNotifyClientsChangedSkipsBlockedClients(t *testing.T) {
 	ready := &sessionClient{outCh: make(chan protocol.Message, 1)}
 	blocked := &sessionClient{outCh: make(chan protocol.Message, 1)}

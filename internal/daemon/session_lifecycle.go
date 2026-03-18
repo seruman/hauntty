@@ -257,7 +257,7 @@ func (s *Session) run() {
 					size:      a.spec.size,
 					version:   a.spec.version,
 					readOnly:  a.spec.readOnly,
-					outCh:     make(chan protocol.Message, 64),
+					outCh:     make(chan protocol.Message, sessionClientOutBufferSize),
 				}
 				go sc.writeLoop()
 

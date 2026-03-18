@@ -6,10 +6,16 @@ import (
 	"log/slog"
 	"math"
 	"syscall"
+	"time"
 
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
 	"github.com/creack/pty"
+)
+
+const (
+	sessionClientOutBufferSize = 256
+	slowClientGracePeriod      = 100 * time.Millisecond
 )
 
 func (c *sessionClient) writeLoop() {
@@ -170,8 +176,20 @@ func broadcastOutput(clients []*sessionClient, name string, msg *protocol.Output
 		case c.outCh <- msg:
 			clients[i] = c
 			i++
+			continue
 		default:
-			slog.Debug("evicting slow client", "session", name)
+		}
+
+		timer := time.NewTimer(slowClientGracePeriod)
+		select {
+		case c.outCh <- msg:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			clients[i] = c
+			i++
+		case <-timer.C:
+			slog.Debug("evicting slow client", "session", name, "grace", slowClientGracePeriod)
 			close(c.outCh)
 			_ = c.closeConn()
 		}
