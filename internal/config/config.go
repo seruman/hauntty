@@ -28,9 +28,18 @@ type ClientConfig struct {
 	ForwardEnv    []string `toml:"forward_env"`
 }
 
+type ResizePolicy string
+
+const (
+	ResizePolicySmallest ResizePolicy = "smallest"
+	ResizePolicyLargest  ResizePolicy = "largest"
+	ResizePolicyFirst    ResizePolicy = "first"
+	ResizePolicyLast     ResizePolicy = "last"
+)
+
 type SessionConfig struct {
-	DefaultCommand string `toml:"default_command"`
-	ResizePolicy   string `toml:"resize_policy"`
+	DefaultCommand string       `toml:"default_command"`
+	ResizePolicy   ResizePolicy `toml:"resize_policy"`
 }
 
 func Default() *Config {
@@ -46,7 +55,7 @@ func Default() *Config {
 			ForwardEnv:    []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"},
 		},
 		Session: SessionConfig{
-			ResizePolicy: "smallest",
+			ResizePolicy: ResizePolicySmallest,
 		},
 	}
 }
@@ -54,7 +63,7 @@ func Default() *Config {
 func Load() (*Config, error) {
 	path, err := DefaultPath()
 	if err != nil {
-		return Default(), nil
+		return nil, fmt.Errorf("config: default path: %w", err)
 	}
 	return LoadFrom(path)
 }
@@ -70,7 +79,20 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("config: %s: %w", path, err)
+	}
+
 	return cfg, nil
+}
+
+func (c *Config) validate() error {
+	switch c.Session.ResizePolicy {
+	case ResizePolicySmallest, ResizePolicyLargest, ResizePolicyFirst, ResizePolicyLast:
+	default:
+		return fmt.Errorf("invalid resize_policy %q", c.Session.ResizePolicy)
+	}
+	return nil
 }
 
 func DefaultPath() (string, error) {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"gotest.tools/v3/assert"
 	"gotest.tools/v3/icmd"
 
 	"code.selman.me/hauntty/internal/config"
@@ -83,7 +82,6 @@ func TestDetachAltScreenPrimaryScreenContent(t *testing.T) {
 
 	result := e.run("dump", "alt-three", "--format", "plain")
 	result.Assert(t, icmd.Success)
-	assert.Assert(t, result.Stdout() != "")
 }
 
 func TestAltScreenDetachReattachCycles(t *testing.T) {

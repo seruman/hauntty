@@ -21,14 +21,10 @@ func TestTypeAndScreen(t *testing.T) {
 	tm.Type("echo hello\n")
 	tm.WaitFor("hello")
 
-	screen := tm.Screen()
-	assert.Assert(t, screen != "", "screen should not be empty")
-
-	vt := tm.ScreenVT()
-	assert.Assert(t, len(vt) > 0, "screen vt should not be empty")
-
-	assert.Assert(t, tm.PromptVisible())
-	assert.Assert(t, tm.PromptVisibleMatch(func(line string) bool { return line == "$" || line == "$ " }))
+	assert.Equal(t, tm.Screen(), "$ echo hello\nhello\n$")
+	assert.DeepEqual(t, tm.ScreenVT(), []byte("$ echo hello\r\nhello\r\n$ \x1b[0m\x1b[3;3H"))
+	assert.Equal(t, tm.PromptVisible(), true)
+	assert.Equal(t, tm.PromptVisibleMatch(func(line string) bool { return line == "$" || line == "$ " }), true)
 }
 
 func TestKey(t *testing.T) {
@@ -38,6 +34,8 @@ func TestKey(t *testing.T) {
 	tm.Type("echo test")
 	tm.Key(libghostty.KeyEnter, 0)
 	tm.WaitFor("test")
+
+	assert.Equal(t, tm.Screen(), "$ echo test\ntest\n$")
 }
 
 func TestResize(t *testing.T) {
@@ -48,9 +46,10 @@ func TestResize(t *testing.T) {
 	tm.WaitFor("$")
 
 	tm.Resize(120, 40)
-	// After resize, shell should still be responsive.
 	tm.Type("echo resized\n")
 	tm.WaitFor("resized")
+
+	assert.Equal(t, tm.Screen(), "$ echo resized\nresized\n$")
 }
 
 func TestSnapshot(t *testing.T) {
@@ -71,8 +70,13 @@ func TestSnapshot(t *testing.T) {
 	tm.Type("echo snap\n")
 	tm.WaitFor("snap")
 
-	dump := tm.Snapshot(libghostty.DumpVTFull)
-	assert.Assert(t, len(dump.VT) > 0, "VT dump should not be empty")
+	got := tm.Snapshot(libghostty.DumpVTFull)
+	assert.DeepEqual(t, got, &libghostty.ScreenDump{
+		Data:        []byte("$ ls marker\r\nmarker\r\n$ echo snap\r\nsnap\r\n$ \x1b[0m\x1b[5;3H"),
+		CursorRow:   4,
+		CursorCol:   2,
+		IsAltScreen: false,
+	})
 }
 
 func TestWaitRowContains(t *testing.T) {
@@ -80,11 +84,18 @@ func TestWaitRowContains(t *testing.T) {
 	tm.WaitFor("$")
 
 	dump := tm.Snapshot(libghostty.DumpPlain)
+	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+		Data:        []byte("$"),
+		CursorRow:   0,
+		CursorCol:   2,
+		IsAltScreen: false,
+	})
+
 	row := int(dump.CursorRow)
 	tm.WaitRowContains(row, "$")
-	assert.Assert(t, tm.RowContains(row, "$"))
+	assert.Equal(t, tm.RowContains(row, "$"), true)
 	tm.WaitCursorRowContains("$")
-	assert.Assert(t, tm.CursorRowContains("$"))
+	assert.Equal(t, tm.CursorRowContains("$"), true)
 	tm.WaitPrompt()
 	tm.WaitPromptMatch(func(line string) bool { return line == "$" || line == "$ " })
 }
@@ -93,6 +104,7 @@ func TestWaitStable(t *testing.T) {
 	tm := termtest.New(t, []string{"/bin/sh"}, termtest.WithEnv("PS1=$ "))
 	tm.WaitFor("$")
 	tm.WaitStable(150 * time.Millisecond)
+	assert.Equal(t, tm.Screen(), "$")
 }
 
 func TestDone(t *testing.T) {

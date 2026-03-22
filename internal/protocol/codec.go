@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ProtocolVersion uint8  = 7
+	ProtocolVersion uint8  = 8
 	maxFrameSize    uint32 = 16 << 20 // 16MB
 )
 
@@ -26,7 +26,7 @@ func (c *Conn) WriteMessage(msg Message) error {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
-	if err := enc.WriteU8(msg.Type()); err != nil {
+	if err := enc.WriteU8(uint8(msg.Type())); err != nil {
 		return err
 	}
 	if err := msg.encode(enc); err != nil {
@@ -118,7 +118,7 @@ func (c *Conn) AcceptHandshake() (uint8, string, error) {
 }
 
 // Call before any concurrent use of the connection.
-func (c *Conn) AcceptVersion(version uint8, revision string) error {
+func (c *Conn) WriteVersionReply(version uint8, revision string) error {
 	enc := NewEncoder(c.rw)
 	if err := enc.WriteU8(version); err != nil {
 		return err
@@ -126,7 +126,8 @@ func (c *Conn) AcceptVersion(version uint8, revision string) error {
 	return enc.WriteString(revision)
 }
 
-func newMessage(t uint8) (Message, error) {
+func newMessage(raw uint8) (Message, error) {
+	t := MessageType(raw)
 	switch t {
 	case TypeAttach:
 		return &Attach{}, nil

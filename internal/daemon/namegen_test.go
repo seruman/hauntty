@@ -1,41 +1,52 @@
 package daemon
 
 import (
-	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
 )
 
 func TestGenerateName(t *testing.T) {
-	for range 100 {
-		name := generateName()
-		parts := strings.SplitN(name, "-", 2)
-		assert.Equal(t, len(parts), 2, "expected adj-noun format, got %q", name)
-		assert.Assert(t, parts[0] != "", "empty adjective in %q", name)
-		assert.Assert(t, parts[1] != "", "empty noun in %q", name)
-	}
+	oldAdjectives := adjectives
+	oldNouns := nouns
+	adjectives = []string{"alpha"}
+	nouns = []string{"beta"}
+	defer func() {
+		adjectives = oldAdjectives
+		nouns = oldNouns
+	}()
+
+	got := generateName()
+	assert.Equal(t, got, "alpha-beta")
 }
 
-func TestGenerateUniqueName_AvoidsCollisions(t *testing.T) {
-	existing := map[string]bool{}
-	for range 50 {
-		name := generateUniqueName(existing)
-		assert.Assert(t, !existing[name], "generateUniqueName returned duplicate %q", name)
-		existing[name] = true
-	}
+func TestGenerateUniqueNameReturnsOnlyAvailableCombination(t *testing.T) {
+	oldAdjectives := adjectives
+	oldNouns := nouns
+	adjectives = []string{"alpha"}
+	nouns = []string{"beta", "gamma"}
+	defer func() {
+		adjectives = oldAdjectives
+		nouns = oldNouns
+	}()
+
+	got := generateUniqueName(map[string]bool{"alpha-beta": true})
+	assert.Equal(t, got, "alpha-gamma")
 }
 
-func TestGenerateUniqueName_ExhaustedSpace(t *testing.T) {
-	existing := make(map[string]bool, len(adjectives)*len(nouns))
-	for _, adj := range adjectives {
-		for _, noun := range nouns {
-			existing[adj+"-"+noun] = true
-		}
-	}
+func TestGenerateUniqueNameAddsNumericSuffixWhenExhausted(t *testing.T) {
+	oldAdjectives := adjectives
+	oldNouns := nouns
+	adjectives = []string{"alpha"}
+	nouns = []string{"beta"}
+	defer func() {
+		adjectives = oldAdjectives
+		nouns = oldNouns
+	}()
 
-	name := generateUniqueName(existing)
-	assert.Assert(t, name != "", "generateUniqueName returned empty string")
-	parts := strings.Split(name, "-")
-	assert.Assert(t, len(parts) >= 3, "expected suffixed name, got %q", name)
+	got := generateUniqueName(map[string]bool{
+		"alpha-beta":   true,
+		"alpha-beta-0": true,
+	})
+	assert.Equal(t, got, "alpha-beta-1")
 }

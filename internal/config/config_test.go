@@ -16,7 +16,7 @@ func TestDefaults(t *testing.T) {
 	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+;")
 	assert.Equal(t, cfg.Session.DefaultCommand, "")
 	assert.DeepEqual(t, cfg.Client.ForwardEnv, []string{"COLORTERM", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"})
-	assert.Equal(t, cfg.Session.ResizePolicy, "smallest")
+	assert.Equal(t, cfg.Session.ResizePolicy, ResizePolicySmallest)
 }
 
 func TestLoadMissing(t *testing.T) {
@@ -36,7 +36,6 @@ default_command = "/bin/zsh"
 	cfg, err := LoadFrom(path)
 	assert.NilError(t, err)
 	assert.Equal(t, cfg.Session.DefaultCommand, "/bin/zsh")
-	// Other defaults preserved.
 	assert.Equal(t, cfg.Daemon.DefaultScrollback, uint32(10000))
 	assert.Equal(t, cfg.Client.DetachKeybind, "ctrl+;")
 }
@@ -73,5 +72,39 @@ func TestLoadInvalid(t *testing.T) {
 	assert.NilError(t, err)
 
 	_, err = LoadFrom(path)
-	assert.Assert(t, err != nil)
+	assert.Error(t, err, "config: parse "+path+": toml: line 1: expected '.' or '=', but got 'v' instead")
+}
+
+func TestLoadInvalidResizePolicy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	err := os.WriteFile(path, []byte(`[session]
+resize_policy = "bogus"
+`), 0o600)
+	assert.NilError(t, err)
+
+	_, err = LoadFrom(path)
+	assert.Error(t, err, "config: "+path+": invalid resize_policy \"bogus\"")
+}
+
+func TestLoadValidResizePolicies(t *testing.T) {
+	policies := []ResizePolicy{
+		ResizePolicySmallest,
+		ResizePolicyLargest,
+		ResizePolicyFirst,
+		ResizePolicyLast,
+	}
+	for _, p := range policies {
+		t.Run(string(p), func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.toml")
+			content := `[session]` + "\n" + `resize_policy = "` + string(p) + `"` + "\n"
+			err := os.WriteFile(path, []byte(content), 0o600)
+			assert.NilError(t, err)
+
+			cfg, err := LoadFrom(path)
+			assert.NilError(t, err)
+			assert.Equal(t, cfg.Session.ResizePolicy, p)
+		})
+	}
 }

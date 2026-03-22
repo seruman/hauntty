@@ -8,7 +8,7 @@ import (
 )
 
 // The returned tempDir (if non-empty) must be cleaned up by the caller.
-func SetupShellEnv(command []string, env []string, sessionName string) (cmd []string, modifiedEnv []string, tempDir string, err error) {
+func prepareShellLaunch(command []string, env []string, sessionName string) (cmd []string, modifiedEnv []string, tempDir string, err error) {
 	cmd = command
 	modifiedEnv = make([]string, len(env))
 	copy(modifiedEnv, env)

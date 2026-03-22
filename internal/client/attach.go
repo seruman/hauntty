@@ -56,29 +56,58 @@ func findDetach(data []byte, dk DetachKey) int {
 	return bytes.Index(data, dk.csiSeq)
 }
 
-func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardEnv []string, readOnly, restore bool) error {
-	fd := int(os.Stdin.Fd())
-
+func prepareInteractiveAttach(fd int, forwardEnv []string) (protocol.Attach, error) {
 	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
 	if err != nil {
-		return fmt.Errorf("get terminal size: %w", err)
+		return protocol.Attach{}, fmt.Errorf("get terminal size: %w", err)
 	}
-
-	env := CollectForwardedEnv(forwardEnv)
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("get cwd: %w", err)
+		return protocol.Attach{}, fmt.Errorf("get cwd: %w", err)
 	}
 
-	attached, err := c.Attach(name, uint16(ws.Col), uint16(ws.Row), ws.Xpixel, ws.Ypixel, command, env, 10000, cwd, readOnly, restore)
+	return protocol.Attach{
+		Cols:       uint16(ws.Col),
+		Rows:       uint16(ws.Row),
+		Xpixel:     ws.Xpixel,
+		Ypixel:     ws.Ypixel,
+		Env:        CollectForwardedEnv(forwardEnv),
+		CWD:        cwd,
+		Scrollback: 0,
+	}, nil
+}
+
+// AttachOpts configures an interactive attach session.
+type AttachOpts struct {
+	Name       string
+	Command    []string
+	DetachKey  DetachKey
+	ForwardEnv []string
+	ReadOnly   bool
+	Restore    bool
+}
+
+func (c *Client) RunAttach(opts AttachOpts) error {
+	fd := int(os.Stdin.Fd())
+
+	req, err := prepareInteractiveAttach(fd, opts.ForwardEnv)
+	if err != nil {
+		return err
+	}
+	req.Name = opts.Name
+	req.Command = opts.Command
+	req.ReadOnly = opts.ReadOnly
+	req.Restore = opts.Restore
+
+	attached, err := c.Attach(&req)
 	if err != nil {
 		return err
 	}
 
 	if attached.Created {
 		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", attached.Name, attached.PID)
-	} else if readOnly {
+	} else if opts.ReadOnly {
 		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", attached.Name, attached.PID)
 	} else {
 		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", attached.Name, attached.PID)
@@ -97,16 +126,16 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		// line gap. Then EL-clear every row (ED touches
 		// scrollback in Ghostty, EL does not).
 		// Cooked mode so OPOST translates \n in the dump to \r\n.
-		cursorRow := int(ws.Row) // fallback: scroll everything
+		cursorRow := int(req.Rows) // fallback: scroll everything
 		if tmpState, rerr := term.MakeRaw(fd); rerr == nil {
 			os.Stdout.Write([]byte("\x1b[6n"))
-			cursorRow = readCursorRow(fd, int(ws.Row))
-			term.Restore(fd, tmpState)
+			cursorRow = readCursorRow(fd, int(req.Rows))
+			_ = term.Restore(fd, tmpState)
 		}
 		scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, cursorRow)...)
 		os.Stdout.Write(scroll)
 		var clear bytes.Buffer
-		for row := 1; row <= int(ws.Row); row++ {
+		for row := 1; row <= int(req.Rows); row++ {
 			fmt.Fprintf(&clear, "\x1b[%d;1H\x1b[2K", row)
 		}
 		clear.WriteString("\x1b[H")
@@ -121,7 +150,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 	if err != nil {
 		return fmt.Errorf("set raw mode: %w", err)
 	}
-	defer term.Restore(fd, oldState)
+	defer func() { _ = term.Restore(fd, oldState) }()
 
 	// Drain terminal responses from the kitty keyboard push and any
 	// mode-setting sequences in the state dump.
@@ -132,7 +161,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		done = make(chan struct{})
 	)
 
-	if !readOnly {
+	if !opts.ReadOnly {
 		sigwinch := make(chan os.Signal, 1)
 		signal.Notify(sigwinch, unix.SIGWINCH)
 
@@ -169,8 +198,8 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
 				data := buf[:n]
-				if i := findDetach(data, dk); i >= 0 {
-					if !readOnly && i > 0 {
+				if i := findDetach(data, opts.DetachKey); i >= 0 {
+					if !opts.ReadOnly && i > 0 {
 						mu.Lock()
 						werr := c.conn.WriteMessage(&protocol.Input{Data: data[:i]})
 						mu.Unlock()
@@ -184,7 +213,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 					mu.Unlock()
 					return
 				}
-				if !readOnly {
+				if !opts.ReadOnly {
 					mu.Lock()
 					werr := c.conn.WriteMessage(&protocol.Input{Data: data})
 					mu.Unlock()
@@ -199,7 +228,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 		}
 	}()
 
-	if attached.Created && len(command) > 0 && len(attached.ScreenDump) > 0 {
+	if attached.Created && len(opts.Command) > 0 && len(attached.ScreenDump) > 0 {
 		if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
 			return fmt.Errorf("write state dump: %w", err)
 		}
@@ -213,7 +242,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 			restoreHostTerminal(fd, oldState, "[hauntty] session exited\n")
 			return &ExitError{Code: int(m.ExitCode)}
 		case *protocol.Error:
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			fmt.Fprintf(os.Stderr, "[hauntty] error: %s\n", m.Message)
 			return &ExitError{Code: 1}
 		case *protocol.ClientsChanged:
@@ -230,7 +259,7 @@ func (c *Client) RunAttach(name string, command []string, dk DetachKey, forwardE
 				restoreHostTerminal(fd, oldState, "[hauntty] detached\n")
 				return nil
 			}
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			return fmt.Errorf("read message: %w", err)
 		}
 		if err := handleMsg(msg); err != nil {
@@ -255,7 +284,7 @@ func restoreHostTerminal(fd int, oldState *term.State, message string) {
 			"\x1b[0m" +
 			"\x1b[J"))
 	drainStdin(fd, 20*time.Millisecond)
-	term.Restore(fd, oldState)
+	_ = term.Restore(fd, oldState)
 	if message != "" {
 		fmt.Fprint(os.Stderr, message)
 	}
@@ -325,6 +354,6 @@ func drainStdin(fd int, timeout time.Duration) {
 		if n <= 0 {
 			return
 		}
-		unix.Read(fd, buf)
+		_, _ = unix.Read(fd, buf)
 	}
 }

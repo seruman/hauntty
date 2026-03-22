@@ -3,50 +3,59 @@ package main
 import (
 	"testing"
 
+	"code.selman.me/hauntty/internal/protocol"
 	"gotest.tools/v3/assert"
 )
 
-func TestResolveCompletionShell(t *testing.T) {
-	t.Run("uses explicit shell", func(t *testing.T) {
-		shell, err := resolveCompletionShell("fish")
+func TestCompletionDynamicTopics(t *testing.T) {
+	topics := completionDynamicTopics()
 
-		assert.NilError(t, err)
-		assert.Equal(t, shell, "fish")
-	})
-
-	t.Run("detects shell from environment", func(t *testing.T) {
-		t.Setenv("SHELL", "/bin/zsh")
-
-		shell, err := resolveCompletionShell("")
-
-		assert.NilError(t, err)
-		assert.Equal(t, shell, "zsh")
-	})
-
-	t.Run("errors for unsupported shell", func(t *testing.T) {
-		t.Setenv("SHELL", "/bin/tcsh")
-
-		_, err := resolveCompletionShell("")
-
-		assert.Error(t, err, "this shell is not supported (tcsh)")
+	assert.DeepEqual(t, topics, map[string]string{
+		"attach":  "live_sessions",
+		"dump":    "dumpable_sessions",
+		"kill":    "live_sessions",
+		"kick":    "live_sessions",
+		"restore": "dead_sessions",
+		"send":    "live_sessions",
+		"status":  "sessions",
+		"wait":    "dumpable_sessions",
 	})
 }
 
-func TestCompletionInitCommand(t *testing.T) {
-	t.Run("uses source pipe for fish", func(t *testing.T) {
-		got := completionInitCommand("ht", "fish")
+func TestCompletionTopicNames(t *testing.T) {
+	sessions := []protocol.Session{
+		{Name: "live-a", State: protocol.SessionStateRunning},
+		{Name: "dead-a", State: protocol.SessionStateDead},
+		{Name: "live-b", State: protocol.SessionStateRunning},
+	}
 
-		assert.Equal(t, got, "ht completion -c fish | source")
+	t.Run("sessions", func(t *testing.T) {
+		names := completionTopicNames("sessions", sessions)
+
+		assert.DeepEqual(t, names, []string{"live-a", "dead-a", "live-b"})
 	})
 
-	t.Run("uses process substitution for zsh", func(t *testing.T) {
-		got := completionInitCommand("ht", "zsh")
+	t.Run("live sessions", func(t *testing.T) {
+		names := completionTopicNames("live_sessions", sessions)
 
-		assert.Equal(t, got, "source <(ht completion -c zsh)")
+		assert.DeepEqual(t, names, []string{"live-a", "live-b"})
 	})
-}
 
-func TestCompletionScriptNilNode(t *testing.T) {
-	_, err := completionScript("bash", nil)
-	assert.Error(t, err, "nil command tree")
+	t.Run("dead sessions", func(t *testing.T) {
+		names := completionTopicNames("dead_sessions", sessions)
+
+		assert.DeepEqual(t, names, []string{"dead-a"})
+	})
+
+	t.Run("dumpable sessions", func(t *testing.T) {
+		names := completionTopicNames("dumpable_sessions", sessions)
+
+		assert.DeepEqual(t, names, []string{"live-a", "dead-a", "live-b"})
+	})
+
+	t.Run("unknown topic", func(t *testing.T) {
+		names := completionTopicNames("unknown", sessions)
+
+		assert.DeepEqual(t, names, []string{})
+	})
 }

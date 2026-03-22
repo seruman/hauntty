@@ -90,6 +90,46 @@ func (e *testEnv) run(args ...string) *icmd.Result {
 	return icmd.RunCmd(cmd, icmd.WithEnv(append(os.Environ(), e.env()...)...))
 }
 
+func (e *testEnv) waitForCommandSuccess(args ...string) *icmd.Result {
+	e.t.Helper()
+
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		result := e.run(args...)
+		if result.ExitCode == 0 {
+			return result
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("wait for command %q: stdout=%q stderr=%q", strings.Join(args, " "), result.Stdout(), result.Stderr())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (e *testEnv) statePath(name string) string {
+	return filepath.Join(os.Getenv("XDG_STATE_HOME"), "hauntty", "sessions", name+".state")
+}
+
+func (e *testEnv) waitForStateFile(name string) {
+	e.t.Helper()
+
+	path := e.statePath(name)
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		_, err := os.Stat(path)
+		if err == nil {
+			return
+		}
+		if err != nil && !os.IsNotExist(err) {
+			e.t.Fatalf("stat state file %q: %v", path, err)
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("state file %q was not created", path)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func (e *testEnv) waitHostPrompt(sh *termtest.Term) {
 	e.t.Helper()
 	sh.WaitPromptMatch(hostPromptRE.MatchString, termtest.WaitTimeout(8*time.Second))

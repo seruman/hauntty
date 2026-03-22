@@ -82,7 +82,7 @@ default_scrollback = 10000
 # Persist dead session state to disk.
 state_persistence = true
 
-# Save session state every N seconds while the session is running.
+# Save session state every N seconds while the session is running. Must be > 0.
 state_persistence_interval = 30
 
 [client]

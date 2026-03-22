@@ -46,15 +46,8 @@ func (c *Client) Close() error {
 	return c.netConn.Close()
 }
 
-func (c *Client) Create(name string, command, env []string, cwd string, scrollback uint32, force bool) (*protocol.Created, error) {
-	err := c.conn.WriteMessage(&protocol.Create{
-		Name:       name,
-		Command:    command,
-		Env:        env,
-		CWD:        cwd,
-		Scrollback: scrollback,
-		Force:      force,
-	})
+func (c *Client) Create(req *protocol.Create) (*protocol.Created, error) {
+	err := c.conn.WriteMessage(req)
 	if err != nil {
 		return nil, fmt.Errorf("send create: %w", err)
 	}
@@ -72,20 +65,8 @@ func (c *Client) Create(name string, command, env []string, cwd string, scrollba
 	}
 }
 
-func (c *Client) Attach(name string, cols, rows, xpixel, ypixel uint16, command, env []string, scrollback uint32, cwd string, readOnly, restore bool) (*protocol.Attached, error) {
-	err := c.conn.WriteMessage(&protocol.Attach{
-		Name:       name,
-		Command:    command,
-		Env:        env,
-		CWD:        cwd,
-		Cols:       cols,
-		Rows:       rows,
-		Xpixel:     xpixel,
-		Ypixel:     ypixel,
-		ReadOnly:   readOnly,
-		Restore:    restore,
-		Scrollback: scrollback,
-	})
+func (c *Client) Attach(req *protocol.Attach) (*protocol.Attached, error) {
+	err := c.conn.WriteMessage(req)
 	if err != nil {
 		return nil, fmt.Errorf("send attach: %w", err)
 	}
@@ -158,7 +139,7 @@ func (c *Client) Send(name string, data []byte) error {
 }
 
 func (c *Client) SendKey(name string, keyCode libghostty.KeyCode, mods libghostty.Modifier) error {
-	if err := c.conn.WriteMessage(&protocol.SendKey{Name: name, Key: uint32(keyCode), Mods: uint32(mods)}); err != nil {
+	if err := c.conn.WriteMessage(&protocol.SendKey{Name: name, Key: protocol.KeyCode(keyCode), Mods: protocol.KeyMods(mods)}); err != nil {
 		return fmt.Errorf("send key: %w", err)
 	}
 	msg, err := c.conn.ReadMessage()
@@ -175,7 +156,7 @@ func (c *Client) SendKey(name string, keyCode libghostty.KeyCode, mods libghostt
 	}
 }
 
-func (c *Client) Dump(name string, format uint8) ([]byte, error) {
+func (c *Client) Dump(name string, format protocol.DumpFormat) ([]byte, error) {
 	if err := c.conn.WriteMessage(&protocol.Dump{Name: name, Format: format}); err != nil {
 		return nil, fmt.Errorf("send dump: %w", err)
 	}
