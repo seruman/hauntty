@@ -77,7 +77,7 @@ func (s *Server) handleSendKey(conn *protocol.Conn, msg *protocol.SendKey) {
 		return
 	}
 
-	data, err := sess.term.EncodeKey(s.ctx, libghostty.KeyCode(msg.Key), libghostty.Modifier(msg.Mods))
+	data, err := sess.term.EncodeKey(libghostty.KeyCode(msg.Key), libghostty.Modifier(msg.Mods))
 	if err != nil {
 		writeError(conn, err.Error())
 		return

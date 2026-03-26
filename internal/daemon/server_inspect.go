@@ -119,19 +119,19 @@ func dumpFormat(format protocol.DumpFormat) libghostty.DumpFormat {
 func dumpDeadState(ctx context.Context, rt *libghostty.Runtime, state *sessionState, scrollback uint32, format protocol.DumpFormat) ([]byte, error) {
 	scrollback = max(scrollback, uint32(bytes.Count(state.VT, []byte{'\n'}))+uint32(state.Rows)+1)
 
-	term, err := rt.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), scrollback)
+	term, err := rt.NewTerminal(uint32(state.Cols), uint32(state.Rows), scrollback)
 	if err != nil {
 		return nil, fmt.Errorf("dump dead state: new terminal: %w", err)
 	}
-	defer term.Close(ctx)
+	defer term.Close()
 
 	if len(state.VT) > 0 {
-		if err := term.Feed(ctx, state.VT); err != nil {
+		if err := term.Feed(state.VT); err != nil {
 			return nil, fmt.Errorf("dump dead state: feed vt: %w", err)
 		}
 	}
 
-	dump, err := term.DumpScreen(ctx, dumpFormat(format))
+	dump, err := term.DumpScreen(dumpFormat(format))
 	if err != nil {
 		return nil, fmt.Errorf("dump dead state: dump screen: %w", err)
 	}
@@ -227,7 +227,7 @@ func (s *Server) statusSnapshot(sessionName string) (uint32, uint32, *protocol.S
 }
 
 func sessionCWD(ctx context.Context, sess *Session) (string, error) {
-	cwd, ok, err := sess.term.GetCwd(ctx)
+	cwd, ok, err := sess.term.GetCwd()
 	if err != nil {
 		return "", fmt.Errorf("lookup cwd for %s: %w", sess.Name, err)
 	}
