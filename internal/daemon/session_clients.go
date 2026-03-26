@@ -97,7 +97,7 @@ func (s *Session) resize(size termSize) {
 		slog.Warn("pty setsize", "session", s.Name, "err", err)
 	}
 	_ = syscall.Kill(-int(s.PID), syscall.SIGWINCH)
-	if err := s.term.Resize(s.ctx, uint32(size.cols), uint32(size.rows)); err != nil {
+	if err := s.term.Resize(uint32(size.cols), uint32(size.rows)); err != nil {
 		slog.Warn("wasm resize", "session", s.Name, "err", err)
 	}
 }

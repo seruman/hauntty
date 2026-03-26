@@ -25,13 +25,13 @@ func (discardRW) Write(p []byte) (int, error) {
 
 func newSessionLoopHarness(t *testing.T) *Session {
 	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, rt.Close())
 	})
 
-	term, err := rt.NewTerminal(ctx, 80, 24, 0)
+	term, err := rt.NewTerminal(80, 24, 0)
 	assert.NilError(t, err)
 
 	ptmx, tty, err := pty.Open()
@@ -63,7 +63,7 @@ func newSessionLoopHarness(t *testing.T) *Session {
 		<-s.done
 		assert.NilError(t, ptmx.Close())
 		assert.NilError(t, tty.Close())
-		assert.NilError(t, term.Close(ctx))
+		assert.NilError(t, term.Close())
 	})
 
 	return s

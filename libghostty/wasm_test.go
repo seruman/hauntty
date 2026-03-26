@@ -12,116 +12,111 @@ import (
 
 func newTerminal(t *testing.T, rt *libghostty.Runtime, cols, rows, scrollback uint32) *libghostty.Terminal {
 	t.Helper()
-	term, err := rt.NewTerminal(t.Context(), cols, rows, scrollback)
+	term, err := rt.NewTerminal(cols, rows, scrollback)
 	assert.NilError(t, err)
 	return term
 }
 
 func TestBasicFeedAndDump(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
-	err = term.Feed(ctx, []byte("Hello, World!\r\n"))
+	err = term.Feed([]byte("Hello, World!\r\n"))
 	assert.NilError(t, err)
 
-	dump, err := term.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err := term.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, dump.Data, []byte("Hello, World!\x1b[0m\x1b[2;1H"))
 }
 
 func TestResize(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
-	err = term.Resize(ctx, 120, 40)
+	err = term.Resize(120, 40)
 	assert.NilError(t, err)
 
-	err = term.Feed(ctx, []byte("after resize"))
+	err = term.Feed([]byte("after resize"))
 	assert.NilError(t, err)
 
-	dump, err := term.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err := term.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, dump.Data, []byte("after resize\x1b[0m\x1b[1;13H"))
 }
 
 func TestCursorPosition(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
-	dump, err := term.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err := term.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.Equal(t, dump.CursorRow, uint32(0))
 	assert.Equal(t, dump.CursorCol, uint32(0))
 
-	err = term.Feed(ctx, []byte("ABCDE"))
+	err = term.Feed([]byte("ABCDE"))
 	assert.NilError(t, err)
-	dump, err = term.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err = term.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.Equal(t, dump.CursorCol, uint32(5))
 	assert.Equal(t, dump.CursorRow, uint32(0))
 }
 
 func TestAltScreen(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
-	dump, err := term.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err := term.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.Equal(t, dump.IsAltScreen, false)
 
-	err = term.Feed(ctx, []byte("\x1b[?1049h"))
+	err = term.Feed([]byte("\x1b[?1049h"))
 	assert.NilError(t, err)
-	dump, err = term.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err = term.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.Equal(t, dump.IsAltScreen, true)
 
-	err = term.Feed(ctx, []byte("\x1b[?1049l"))
+	err = term.Feed([]byte("\x1b[?1049l"))
 	assert.NilError(t, err)
-	dump, err = term.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err = term.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.Equal(t, dump.IsAltScreen, false)
 }
 
 func TestMultipleTerminals(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term1 := newTerminal(t, rt, 80, 24, 1000)
-	defer term1.Close(ctx)
+	defer term1.Close()
 
 	term2 := newTerminal(t, rt, 80, 24, 1000)
-	defer term2.Close(ctx)
+	defer term2.Close()
 
-	err = term1.Feed(ctx, []byte("terminal one"))
+	err = term1.Feed([]byte("terminal one"))
 	assert.NilError(t, err)
-	err = term2.Feed(ctx, []byte("terminal two"))
+	err = term2.Feed([]byte("terminal two"))
 	assert.NilError(t, err)
 
-	dump1, err := term1.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump1, err := term1.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
-	dump2, err := term2.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump2, err := term2.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 
 	assert.DeepEqual(t, dump1.Data, []byte("terminal one\x1b[0m\x1b[1;13H"))
@@ -129,208 +124,201 @@ func TestMultipleTerminals(t *testing.T) {
 }
 
 func TestDumpUnwrap(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	// 20-col terminal: 30 chars will soft-wrap onto two lines.
 	term := newTerminal(t, rt, 20, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
-	err = term.Feed(ctx, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
+	err = term.Feed([]byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
 	assert.NilError(t, err)
 
-	wrapped, err := term.DumpScreen(ctx, libghostty.DumpPlain)
+	wrapped, err := term.DumpScreen(libghostty.DumpPlain)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, wrapped.Data, []byte("aaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbb"))
 
-	unwrapped, err := term.DumpScreen(ctx, libghostty.DumpPlain|libghostty.DumpFlagUnwrap)
+	unwrapped, err := term.DumpScreen(libghostty.DumpPlain | libghostty.DumpFlagUnwrap)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, unwrapped.Data, []byte("aaaaaaaaaaaaaaaaaaaabbbbbbbbbb"))
 }
 
 func TestDumpScrollback(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	// 80x5 terminal: 10 lines will push lines 1-6 into scrollback.
 	term := newTerminal(t, rt, 80, 5, 100)
-	defer term.Close(ctx)
+	defer term.Close()
 
 	for i := 1; i <= 10; i++ {
-		err = term.Feed(ctx, fmt.Appendf(nil, "line %d\r\n", i))
+		err = term.Feed(fmt.Appendf(nil, "line %d\r\n", i))
 		assert.NilError(t, err)
 	}
 
 	t.Run("visible only", func(t *testing.T) {
-		dump, err := term.DumpScreen(ctx, libghostty.DumpPlain)
+		dump, err := term.DumpScreen(libghostty.DumpPlain)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, dump.Data, []byte("line 7\nline 8\nline 9\nline 10"))
 	})
 
 	t.Run("with scrollback", func(t *testing.T) {
-		dump, err := term.DumpScreen(ctx, libghostty.DumpPlain|libghostty.DumpFlagScrollback)
+		dump, err := term.DumpScreen(libghostty.DumpPlain | libghostty.DumpFlagScrollback)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, dump.Data, []byte("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"))
 	})
 }
 
 func TestDumpHTML(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
-	err = term.Feed(ctx, []byte("Hello"))
+	err = term.Feed([]byte("Hello"))
 	assert.NilError(t, err)
 
-	dump, err := term.DumpScreen(ctx, libghostty.DumpHTML)
+	dump, err := term.DumpScreen(libghostty.DumpHTML)
 	assert.NilError(t, err)
 	golden.AssertBytes(t, dump.Data, "dump_html.golden")
 }
 
 func TestEncodeKey(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
 	t.Run("plain letter", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyCode('a'), 0)
+		data, err := term.EncodeKey(libghostty.KeyCode('a'), 0)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("a"))
 	})
 
 	t.Run("ctrl+c", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyCode('c'), libghostty.ModCtrl)
+		data, err := term.EncodeKey(libghostty.KeyCode('c'), libghostty.ModCtrl)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x03"))
 	})
 
 	t.Run("enter", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyEnter, 0)
+		data, err := term.EncodeKey(libghostty.KeyEnter, 0)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\r"))
 	})
 
 	t.Run("escape", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyEscape, 0)
+		data, err := term.EncodeKey(libghostty.KeyEscape, 0)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1b"))
 	})
 
 	t.Run("arrow up", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyUp, 0)
+		data, err := term.EncodeKey(libghostty.KeyUp, 0)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1b[A"))
 	})
 
 	t.Run("ctrl+shift+up", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyUp, libghostty.ModCtrl|libghostty.ModShift)
+		data, err := term.EncodeKey(libghostty.KeyUp, libghostty.ModCtrl|libghostty.ModShift)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1b[1;6A"))
 	})
 
 	t.Run("alt+a", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyCode('a'), libghostty.ModAlt)
+		data, err := term.EncodeKey(libghostty.KeyCode('a'), libghostty.ModAlt)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1ba"))
 	})
 
 	t.Run("f1", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyF1, 0)
+		data, err := term.EncodeKey(libghostty.KeyF1, 0)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1bOP"))
 	})
 }
 
 func TestEncodeKeyKittyMode(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
 	// Push kitty keyboard mode (disambiguate).
-	err = term.Feed(ctx, []byte("\x1b[>1u"))
+	err = term.Feed([]byte("\x1b[>1u"))
 	assert.NilError(t, err)
 
 	t.Run("ctrl+c in kitty mode", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyCode('c'), libghostty.ModCtrl)
+		data, err := term.EncodeKey(libghostty.KeyCode('c'), libghostty.ModCtrl)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\x1b[99;5u"))
 	})
 
 	t.Run("enter in kitty mode", func(t *testing.T) {
-		data, err := term.EncodeKey(ctx, libghostty.KeyEnter, 0)
+		data, err := term.EncodeKey(libghostty.KeyEnter, 0)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, data, []byte("\r"))
 	})
 }
 
 func TestGetCwd(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	defer term.Close(ctx)
+	defer term.Close()
 
-	pwd, ok, err := term.GetCwd(ctx)
+	pwd, ok, err := term.GetCwd()
 	assert.NilError(t, err)
 	assert.Equal(t, ok, false)
 	assert.Equal(t, pwd, "")
 
-	err = term.Feed(ctx, []byte("\x1b]7;file:///tmp/example\x1b\\"))
+	err = term.Feed([]byte("\x1b]7;file:///tmp/example\x1b\\"))
 	assert.NilError(t, err)
-	pwd, ok, err = term.GetCwd(ctx)
+	pwd, ok, err = term.GetCwd()
 	assert.NilError(t, err)
 	assert.Equal(t, ok, true)
 	assert.Equal(t, pwd, "/tmp/example")
 
-	err = term.Feed(ctx, []byte("\x1b]7;file:///home/user/src\x07"))
+	err = term.Feed([]byte("\x1b]7;file:///home/user/src\x07"))
 	assert.NilError(t, err)
-	pwd, ok, err = term.GetCwd(ctx)
+	pwd, ok, err = term.GetCwd()
 	assert.NilError(t, err)
 	assert.Equal(t, ok, true)
 	assert.Equal(t, pwd, "/home/user/src")
 
-	err = term.Feed(ctx, []byte("\x1b]7;kitty-shell-cwd://myhost/var/log\x07"))
+	err = term.Feed([]byte("\x1b]7;kitty-shell-cwd://myhost/var/log\x07"))
 	assert.NilError(t, err)
-	pwd, ok, err = term.GetCwd(ctx)
+	pwd, ok, err = term.GetCwd()
 	assert.NilError(t, err)
 	assert.Equal(t, ok, true)
 	assert.Equal(t, pwd, "/var/log")
 }
 
 func TestReInit(t *testing.T) {
-	ctx := t.Context()
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
 	defer rt.Close()
 
 	term := newTerminal(t, rt, 80, 24, 1000)
-	err = term.Feed(ctx, []byte("first session"))
+	err = term.Feed([]byte("first session"))
 	assert.NilError(t, err)
-	err = term.Close(ctx)
+	err = term.Close()
 	assert.NilError(t, err)
 
 	term2 := newTerminal(t, rt, 80, 24, 1000)
-	defer term2.Close(ctx)
+	defer term2.Close()
 
-	dump, err := term2.DumpScreen(ctx, libghostty.DumpVTFull)
+	dump, err := term2.DumpScreen(libghostty.DumpVTFull)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, dump.Data, []byte("\x1b[0m\x1b[1;1H"))
 }

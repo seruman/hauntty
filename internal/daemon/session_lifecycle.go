@@ -68,14 +68,14 @@ func startSession(ctx context.Context, launch *sessionLaunch, term *libghostty.T
 }
 
 func newSession(ctx context.Context, wasmRT *libghostty.Runtime, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
-	term, err := wasmRT.NewTerminal(ctx, uint32(spec.size.cols), uint32(spec.size.rows), spec.scrollback)
+	term, err := wasmRT.NewTerminal(uint32(spec.size.cols), uint32(spec.size.rows), spec.scrollback)
 	if err != nil {
 		return nil, err
 	}
 
 	launch, err := launchSessionProcess(spec)
 	if err != nil {
-		term.Close(ctx)
+		term.Close()
 		return nil, err
 	}
 
@@ -83,7 +83,7 @@ func newSession(ctx context.Context, wasmRT *libghostty.Runtime, resizePolicy co
 }
 
 func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sessionState, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
-	term, err := wasmRT.NewTerminal(ctx, uint32(state.Cols), uint32(state.Rows), spec.scrollback)
+	term, err := wasmRT.NewTerminal(uint32(state.Cols), uint32(state.Rows), spec.scrollback)
 	if err != nil {
 		return nil, err
 	}
@@ -91,25 +91,25 @@ func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sess
 	cleanup := true
 	defer func() {
 		if cleanup {
-			term.Close(ctx)
+			term.Close()
 		}
 	}()
 
 	if len(state.VT) > 0 {
-		if err := term.Feed(ctx, state.VT); err != nil {
+		if err := term.Feed(state.VT); err != nil {
 			return nil, err
 		}
 	}
 	if state.IsAltScreen {
-		if err := term.Feed(ctx, []byte("\x1b[?1049l")); err != nil {
+		if err := term.Feed([]byte("\x1b[?1049l")); err != nil {
 			return nil, err
 		}
 	}
-	if err := term.Feed(ctx, []byte("\x1b[!p")); err != nil {
+	if err := term.Feed([]byte("\x1b[!p")); err != nil {
 		return nil, err
 	}
 	if state.Cols != spec.size.cols || state.Rows != spec.size.rows {
-		if err := term.Resize(ctx, uint32(spec.size.cols), uint32(spec.size.rows)); err != nil {
+		if err := term.Resize(uint32(spec.size.cols), uint32(spec.size.rows)); err != nil {
 			slog.Warn("wasm resize on restore", "session", spec.name, "err", err)
 		}
 	}
@@ -125,7 +125,7 @@ func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sess
 
 func (s *Session) feedLoop(ctx context.Context) {
 	for item := range s.feedCh {
-		if err := s.term.Feed(ctx, *item.data); err != nil {
+		if err := s.term.Feed(*item.data); err != nil {
 			slog.Debug("wasm feed error", "session", s.Name, "err", err)
 		}
 		s.feedApplied.Store(item.seq)
@@ -240,7 +240,7 @@ func (s *Session) run() {
 				// Attach dumps must reflect every PTY chunk we've already accepted.
 				s.waitFeedApplied(nextFeedSeq)
 
-				dump, err := s.term.DumpScreen(s.ctx, libghostty.DumpVTFull)
+				dump, err := s.term.DumpScreen(libghostty.DumpVTFull)
 				if err != nil {
 					a.result <- attachResp{err: err}
 					continue
@@ -363,7 +363,7 @@ func (s *Session) close(ctx context.Context) {
 		_ = syscall.Kill(-int(s.PID), syscall.SIGKILL)
 		<-s.done
 	}
-	s.term.Close(ctx)
+	s.term.Close()
 	if s.tempDir != "" {
 		os.RemoveAll(s.tempDir)
 	}
@@ -379,7 +379,7 @@ func (s *Session) sendInput(data []byte) error {
 }
 
 func (s *Session) dumpScreen(ctx context.Context, format libghostty.DumpFormat) (*libghostty.ScreenDump, error) {
-	return s.term.DumpScreen(ctx, format)
+	return s.term.DumpScreen(format)
 }
 
 func exitCodeFromWaitStatus(ws syscall.WaitStatus) int32 {

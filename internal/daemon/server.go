@@ -47,7 +47,7 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy config.Resi
 		return nil, fmt.Errorf("daemon: state_persistence_interval must be > 0 when state persistence is enabled")
 	}
 
-	rt, err := libghostty.NewRuntime(ctx)
+	rt, err := libghostty.NewRuntime()
 	if err != nil {
 		return nil, fmt.Errorf("daemon: init wasm runtime: %w", err)
 	}

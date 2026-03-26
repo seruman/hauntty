@@ -23,7 +23,7 @@ var (
 func getRuntime(t testing.TB) *libghostty.Runtime {
 	t.Helper()
 	sharedOnce.Do(func() {
-		rt, err := libghostty.NewRuntime(context.Background())
+		rt, err := libghostty.NewRuntime()
 		if err != nil {
 			panic(fmt.Sprintf("termtest: init wasm runtime: %v", err))
 		}
@@ -123,14 +123,14 @@ func New(t testing.TB, command []string, opts ...Option) *Term {
 	rt := getRuntime(t)
 	ctx := t.Context()
 
-	term, err := rt.NewTerminal(ctx, o.cols, o.rows, o.scrollback)
+	term, err := rt.NewTerminal(o.cols, o.rows, o.scrollback)
 	if err != nil {
 		t.Fatalf("termtest: new terminal: %v", err)
 	}
 
 	binPath, err := lookPathIn(command[0], o.env)
 	if err != nil {
-		term.Close(ctx)
+		term.Close()
 		t.Fatalf("termtest: lookup %q: %v", command[0], err)
 	}
 	cmd := &exec.Cmd{
@@ -145,7 +145,7 @@ func New(t testing.TB, command []string, opts ...Option) *Term {
 	ws := &pty.Winsize{Cols: uint16(o.cols), Rows: uint16(o.rows)}
 	ptmx, err := pty.StartWithSize(cmd, ws)
 	if err != nil {
-		term.Close(ctx)
+		term.Close()
 		t.Fatalf("termtest: start pty: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func New(t testing.TB, command []string, opts ...Option) *Term {
 		_ = cmd.Wait()
 		<-tm.done
 		ptmx.Close()
-		term.Close(ctx)
+		term.Close()
 	})
 
 	return tm
@@ -176,7 +176,7 @@ func (tm *Term) readLoop() {
 	for {
 		n, err := tm.ptmx.Read(buf)
 		if n > 0 {
-			_ = tm.term.Feed(tm.ctx, buf[:n])
+			_ = tm.term.Feed(buf[:n])
 		}
 		if err != nil {
 			break
@@ -194,7 +194,7 @@ func (tm *Term) Type(s string) {
 
 func (tm *Term) Key(keyCode libghostty.KeyCode, mods libghostty.Modifier) {
 	tm.t.Helper()
-	data, err := tm.term.EncodeKey(tm.ctx, keyCode, mods)
+	data, err := tm.term.EncodeKey(keyCode, mods)
 	if err != nil {
 		tm.t.Fatalf("termtest: encode key: %v", err)
 	}
@@ -207,7 +207,7 @@ func (tm *Term) Key(keyCode libghostty.KeyCode, mods libghostty.Modifier) {
 
 func (tm *Term) Screen() string {
 	tm.t.Helper()
-	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+	dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 	if err != nil {
 		tm.t.Fatalf("termtest: dump screen: %v", err)
 	}
@@ -216,7 +216,7 @@ func (tm *Term) Screen() string {
 
 func (tm *Term) ScreenVT() []byte {
 	tm.t.Helper()
-	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpVTFull)
+	dump, err := tm.term.DumpScreen(libghostty.DumpVTFull)
 	if err != nil {
 		tm.t.Fatalf("termtest: dump screen vt: %v", err)
 	}
@@ -225,7 +225,7 @@ func (tm *Term) ScreenVT() []byte {
 
 func (tm *Term) Snapshot(format libghostty.DumpFormat) *libghostty.ScreenDump {
 	tm.t.Helper()
-	dump, err := tm.term.DumpScreen(tm.ctx, format)
+	dump, err := tm.term.DumpScreen(format)
 	if err != nil {
 		tm.t.Fatalf("termtest: snapshot: %v", err)
 	}
@@ -238,7 +238,7 @@ func (tm *Term) Resize(cols, rows uint32) {
 	if err := pty.Setsize(tm.ptmx, ws); err != nil {
 		tm.t.Fatalf("termtest: setsize: %v", err)
 	}
-	if err := tm.term.Resize(tm.ctx, cols, rows); err != nil {
+	if err := tm.term.Resize(cols, rows); err != nil {
 		tm.t.Fatalf("termtest: wasm resize: %v", err)
 	}
 }
@@ -283,7 +283,7 @@ func (tm *Term) WaitFor(substr string, opts ...WaitOption) {
 		case <-deadline:
 			tm.t.Fatalf("termtest: WaitFor(%q) timed out after %v\nlast screen:\n%s", substr, wo.timeout, last)
 		case <-ticker.C:
-			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 			if err != nil {
 				continue
 			}
@@ -297,7 +297,7 @@ func (tm *Term) WaitFor(substr string, opts ...WaitOption) {
 
 func (tm *Term) RowContains(row int, substr string) bool {
 	tm.t.Helper()
-	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+	dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 	if err != nil {
 		return false
 	}
@@ -306,7 +306,7 @@ func (tm *Term) RowContains(row int, substr string) bool {
 
 func (tm *Term) CursorRowContains(substr string) bool {
 	tm.t.Helper()
-	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+	dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 	if err != nil {
 		return false
 	}
@@ -334,7 +334,7 @@ func (tm *Term) WaitRowContains(row int, substr string, opts ...WaitOption) {
 		case <-deadline:
 			tm.t.Fatalf("termtest: WaitRowContains(row=%d, %q) timed out after %v\nlast screen:\n%s", row, substr, wo.timeout, last)
 		case <-ticker.C:
-			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 			if err != nil {
 				continue
 			}
@@ -363,7 +363,7 @@ func (tm *Term) WaitCursorRowContains(substr string, opts ...WaitOption) {
 		case <-deadline:
 			tm.t.Fatalf("termtest: WaitCursorRowContains(%q) timed out after %v\nlast screen:\n%s", substr, wo.timeout, last)
 		case <-ticker.C:
-			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 			if err != nil {
 				continue
 			}
@@ -383,7 +383,7 @@ func (tm *Term) PromptVisible() bool {
 
 func (tm *Term) PromptVisibleMatch(match func(string) bool) bool {
 	tm.t.Helper()
-	dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+	dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 	if err != nil {
 		return false
 	}
@@ -414,7 +414,7 @@ func (tm *Term) WaitPromptMatch(match func(string) bool, opts ...WaitOption) {
 		case <-deadline:
 			tm.t.Fatalf("termtest: WaitPromptMatch timed out after %v\nlast screen:\n%s", wo.timeout, last)
 		case <-ticker.C:
-			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 			if err != nil {
 				continue
 			}
@@ -445,7 +445,7 @@ func (tm *Term) WaitStable(stableFor time.Duration, opts ...WaitOption) {
 		case <-deadline:
 			tm.t.Fatalf("termtest: WaitStable(%v) timed out after %v\nlast screen:\n%s", stableFor, wo.timeout, last)
 		case <-ticker.C:
-			dump, err := tm.term.DumpScreen(tm.ctx, libghostty.DumpPlain)
+			dump, err := tm.term.DumpScreen(libghostty.DumpPlain)
 			if err != nil {
 				continue
 			}
