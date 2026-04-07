@@ -10,7 +10,7 @@ import (
 	"code.selman.me/hauntty/libghostty/wasmvt"
 )
 
-//go:generate sh -c "cd ../vt && DEVELOPER_DIR=/Library/Developer/CommandLineTools zig build -Doptimize=ReleaseSmall && cd ../libghostty && mkdir -p wasmvt && go tool wasm2go < hauntty-vt.wasm | sed 's/^package wasm2go$/package wasmvt/' > wasmvt/vt.generated.go"
+//go:generate sh -c "cd ../vt && DEVELOPER_DIR=/Library/Developer/CommandLineTools zig build -Doptimize=ReleaseSmall && cd ../libghostty && mkdir -p wasmvt && go tool wasm2go -unsafe -nanbox -o wasmvt/vt.generated.go hauntty-vt.wasm && sed -i '' 's/^package wasm2go$/package wasmvt/' wasmvt/vt.generated.go"
 
 const feedBufSize = 64 * 1024 // 64KB feed buffer
 
