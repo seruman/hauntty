@@ -167,6 +167,78 @@ func TestPrepareCreateDeadSession_ForceRemovesState(t *testing.T) {
 	assert.Error(t, statErr, "stat "+statePath+": no such file or directory")
 }
 
+func TestPrepareRestoreDeadSessionReturnsState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	want := &sessionState{
+		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
+		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+	}
+	writeDeadSessionState(t, "dead", want)
+
+	srv := &Server{
+		sessions:  make(map[string]*Session),
+		persister: &persister{},
+	}
+
+	got, err := srv.prepareRestoreDeadSession("dead")
+	assert.NilError(t, err)
+	assert.DeepEqual(t, got, want)
+}
+
+func TestPrepareRestoreDeadSessionErrorsWhenRunning(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	writeDeadSessionState(t, "sess", &sessionState{
+		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
+		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+	})
+
+	srv := &Server{
+		sessions:  map[string]*Session{"sess": {}},
+		persister: &persister{},
+	}
+
+	got, err := srv.prepareRestoreDeadSession("sess")
+	assert.Error(t, err, "session is running")
+	assert.DeepEqual(t, got, (*sessionState)(nil))
+}
+
+func TestPrepareRestoreDeadSessionErrorsWhenMissing(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	srv := &Server{
+		sessions:  make(map[string]*Session),
+		persister: &persister{},
+	}
+
+	got, err := srv.prepareRestoreDeadSession("missing")
+	assert.Error(t, err, "no saved state")
+	assert.DeepEqual(t, got, (*sessionState)(nil))
+}
+
+func TestRollbackRestoreDeadSessionRewritesState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	state := &sessionState{
+		Cols: 80, Rows: 24, CursorRow: 3, CursorCol: 4,
+		SavedAt: time.Unix(1700000000, 0), VT: []byte("saved"),
+	}
+
+	srv := &Server{
+		sessions:  make(map[string]*Session),
+		persister: &persister{},
+	}
+
+	err := srv.rollbackRestoreDeadSession("dead", state, os.ErrInvalid)
+	assert.Error(t, err, "invalid argument")
+
+	got, exists, err := srv.readDeadSession("dead")
+	assert.NilError(t, err)
+	assert.Equal(t, exists, true)
+	assert.DeepEqual(t, got, state)
+}
+
 func TestPruneDeadSessions(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmp)

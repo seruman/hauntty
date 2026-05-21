@@ -338,6 +338,19 @@ func (s *Server) liveSessions() map[string]*Session {
 	return m
 }
 
+func (s *Server) liveSession(name string) (*Session, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.sessions[name]
+	return sess, ok
+}
+
+func writeOK(conn *protocol.Conn) {
+	if err := conn.WriteMessage(&protocol.OK{}); err != nil {
+		slog.Debug("write ok response", "err", err)
+	}
+}
+
 func writeError(conn *protocol.Conn, message string) {
 	if err := conn.WriteMessage(&protocol.Error{Message: message}); err != nil {
 		slog.Debug("write error response", "err", err)

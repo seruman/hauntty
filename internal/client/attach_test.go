@@ -6,35 +6,53 @@ import (
 	"testing"
 	"time"
 
+	"code.selman.me/hauntty/internal/protocol"
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 	"gotest.tools/v3/assert"
 )
 
-func TestPrepareInteractiveAttach(t *testing.T) {
-	master, slave, err := pty.Open()
+func TestAttachRequestFromOpts(t *testing.T) {
+	opts := AttachOpts{
+		Name:     "demo",
+		Command:  []string{"sh", "-lc", "echo hi"},
+		ReadOnly: true,
+		Restore:  true,
+		Metadata: func(fd int) (AttachMetadata, error) {
+			assert.Equal(t, fd, 7)
+			return AttachMetadata{
+				Cols:   100,
+				Rows:   40,
+				Xpixel: 900,
+				Ypixel: 700,
+				Env:    []string{"TERM=xterm-256color"},
+				CWD:    "/tmp/demo",
+			}, nil
+		},
+	}
+
+	got, err := attachRequestFromOpts(7, opts)
 	assert.NilError(t, err)
-	defer master.Close()
-	defer slave.Close()
+	assert.DeepEqual(t, got, &protocol.Attach{
+		Name:       "demo",
+		Command:    []string{"sh", "-lc", "echo hi"},
+		Cols:       100,
+		Rows:       40,
+		Xpixel:     900,
+		Ypixel:     700,
+		Env:        []string{"TERM=xterm-256color"},
+		CWD:        "/tmp/demo",
+		Scrollback: 0,
+		ReadOnly:   true,
+		Restore:    true,
+	})
+}
 
-	assert.NilError(t, pty.Setsize(slave, &pty.Winsize{Cols: 132, Rows: 47, X: 900, Y: 700}))
-
-	cwd := t.TempDir()
-	t.Chdir(cwd)
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("SHELL", "/bin/bash")
-	t.Setenv("COLORTERM", "truecolor")
-
-	req, err := prepareInteractiveAttach(int(slave.Fd()), []string{"COLORTERM"})
-	assert.NilError(t, err)
-	assert.Equal(t, req.Cols, uint16(132))
-	assert.Equal(t, req.Rows, uint16(47))
-	assert.Equal(t, req.Xpixel, uint16(900))
-	assert.Equal(t, req.Ypixel, uint16(700))
-	assert.DeepEqual(t, req.Env, []string{"TERM=xterm-256color", "SHELL=/bin/bash", "COLORTERM=truecolor"})
-	assert.Equal(t, req.CWD, cwd)
-	assert.Equal(t, req.Scrollback, uint32(0))
+func TestAttachRequestFromOptsRequiresMetadata(t *testing.T) {
+	got, err := attachRequestFromOpts(7, AttachOpts{})
+	assert.Error(t, err, "attach metadata function is required")
+	assert.DeepEqual(t, got, (*protocol.Attach)(nil))
 }
 
 func TestDrainStdin(t *testing.T) {

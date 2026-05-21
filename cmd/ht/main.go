@@ -21,9 +21,9 @@ import (
 	"code.selman.me/hauntty/internal/client"
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/daemon"
-	"code.selman.me/hauntty/internal/protocol"
 	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -83,11 +83,11 @@ func (cmd *AttachCmd) Run(cfg *config.Config) error {
 	command := resolveDefaultCommand(cmd.Command, cfg)
 
 	return c.RunAttach(client.AttachOpts{
-		Name:       cmd.Name,
-		Command:    command,
-		DetachKey:  dk,
-		ForwardEnv: cfg.Client.ForwardEnv,
-		ReadOnly:   cmd.ReadOnly,
+		Name:      cmd.Name,
+		Command:   command,
+		DetachKey: dk,
+		Metadata:  attachMetadataFunc(cfg.Client.ForwardEnv, os.LookupEnv),
+		ReadOnly:  cmd.ReadOnly,
 	})
 }
 
@@ -112,14 +112,12 @@ func (cmd *NewCmd) Run(cfg *config.Config) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 
-	env := client.CollectForwardedEnv(cfg.Client.ForwardEnv)
-	created, err := c.Create(&protocol.Create{
-		Name:       cmd.Name,
-		Command:    resolveDefaultCommand(cmd.Command, cfg),
-		Env:        env,
-		CWD:        cwd,
-		Scrollback: 0,
-		Force:      cmd.Force,
+	created, err := c.CreateSession(client.CreateSessionOpts{
+		Name:    cmd.Name,
+		Command: resolveDefaultCommand(cmd.Command, cfg),
+		Env:     collectForwardedEnv(cfg.Client.ForwardEnv, os.LookupEnv),
+		CWD:     cwd,
+		Force:   cmd.Force,
 	})
 	if err != nil {
 		return err
@@ -140,7 +138,7 @@ func (cmd *ListCmd) Run(cfg *config.Config) error {
 	}
 	defer c.Close()
 
-	sessions, err := c.List(false)
+	sessions, err := c.ListSessions(false)
 	if err != nil {
 		return err
 	}
@@ -151,7 +149,7 @@ func (cmd *ListCmd) Run(cfg *config.Config) error {
 		home = ""
 	}
 
-	rows := sessionListRows(sessions.Sessions, cmd.All, home)
+	rows := sessionListRows(sessions, cmd.All, home)
 	if len(rows) == 1 {
 		fmt.Fprintln(os.Stderr, "no sessions")
 		return nil
@@ -159,10 +157,10 @@ func (cmd *ListCmd) Run(cfg *config.Config) error {
 	return writeSessionRows(os.Stdout, rows)
 }
 
-func sessionListRows(sessions []protocol.Session, showAll bool, home string) [][]string {
+func sessionListRows(sessions []client.Session, showAll bool, home string) [][]string {
 	rows := [][]string{{"NAME", "STATE", "SIZE", "CWD", "PID", "CREATED", "SAVED"}}
 	for _, s := range sessions {
-		if !showAll && s.State == protocol.SessionStateDead {
+		if !showAll && s.State == client.SessionStateDead {
 			continue
 		}
 		cwd := s.CWD
@@ -289,19 +287,19 @@ func (cmd *DumpCmd) Run(cfg *config.Config) error {
 	return err
 }
 
-func dumpRequestFormat(format string, join, scrollback bool) protocol.DumpFormat {
-	var value protocol.DumpFormat
+func dumpRequestFormat(format string, join, scrollback bool) client.DumpFormat {
+	var value client.DumpFormat
 	switch format {
 	case "vt":
-		value = protocol.DumpVT
+		value = client.DumpVT
 	case "html":
-		value = protocol.DumpHTML
+		value = client.DumpHTML
 	}
 	if join {
-		value |= protocol.DumpFlagUnwrap
+		value |= client.DumpFlagUnwrap
 	}
 	if scrollback {
-		value |= protocol.DumpFlagScrollback
+		value |= client.DumpFlagScrollback
 	}
 	return value
 }
@@ -335,11 +333,11 @@ func (cmd *RestoreCmd) Run(cfg *config.Config) error {
 	defer c.Close()
 
 	return c.RunAttach(client.AttachOpts{
-		Name:       cmd.Name,
-		DetachKey:  dk,
-		ForwardEnv: cfg.Client.ForwardEnv,
-		ReadOnly:   cmd.ReadOnly,
-		Restore:    true,
+		Name:      cmd.Name,
+		DetachKey: dk,
+		Metadata:  attachMetadataFunc(cfg.Client.ForwardEnv, os.LookupEnv),
+		ReadOnly:  cmd.ReadOnly,
+		Restore:   true,
 	})
 }
 
@@ -450,7 +448,7 @@ func (cmd *WaitCmd) Run(cfg *config.Config) error {
 
 	deadline := time.Now().Add(time.Duration(cmd.Timeout) * time.Millisecond)
 	for {
-		data, err := c.Dump(cmd.Name, protocol.DumpPlain)
+		data, err := c.Dump(cmd.Name, client.DumpPlain)
 		if err != nil {
 			return &commandExitError{code: 2, stderr: fmt.Sprintf("error: %v\n", err)}
 		}
@@ -581,6 +579,51 @@ func (cmd *DaemonCmd) Run(cfg *config.Config) error {
 	}
 
 	return srv.Listen()
+}
+
+var alwaysForwardEnv = []string{
+	"TERM",
+	"SHELL",
+}
+
+type envLookupFunc func(string) (string, bool)
+
+func collectForwardedEnv(extra []string, lookup envLookupFunc) []string {
+	env := make([]string, 0, len(alwaysForwardEnv)+len(extra))
+	for _, key := range alwaysForwardEnv {
+		if val, ok := lookup(key); ok {
+			env = append(env, key+"="+val)
+		}
+	}
+	for _, key := range extra {
+		if val, ok := lookup(key); ok {
+			env = append(env, key+"="+val)
+		}
+	}
+	return env
+}
+
+func attachMetadataFunc(extraEnv []string, lookup envLookupFunc) client.AttachMetadataFunc {
+	return func(fd int) (client.AttachMetadata, error) {
+		ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+		if err != nil {
+			return client.AttachMetadata{}, fmt.Errorf("get terminal size: %w", err)
+		}
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			return client.AttachMetadata{}, fmt.Errorf("get cwd: %w", err)
+		}
+
+		return client.AttachMetadata{
+			Cols:   uint16(ws.Col),
+			Rows:   uint16(ws.Row),
+			Xpixel: ws.Xpixel,
+			Ypixel: ws.Ypixel,
+			Env:    collectForwardedEnv(extraEnv, lookup),
+			CWD:    cwd,
+		}, nil
+	}
 }
 
 func resolveDefaultCommand(command []string, cfg *config.Config) []string {

@@ -4,54 +4,52 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
-
-	"code.selman.me/hauntty/libghostty"
 )
 
 func TestParseKeyNotation(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		code  libghostty.KeyCode
-		mods  libghostty.Modifier
+		code  KeyCode
+		mods  Modifier
 	}{
-		{"single letter", "a", libghostty.KeyCode('a'), 0},
-		{"uppercase letter", "A", libghostty.KeyCode('a'), 0},
-		{"digit", "1", libghostty.KeyCode('1'), 0},
-		{"space", "space", libghostty.KeyCode(' '), 0},
-		{"enter", "enter", libghostty.KeyEnter, 0},
-		{"return alias", "return", libghostty.KeyEnter, 0},
-		{"escape", "escape", libghostty.KeyEscape, 0},
-		{"esc alias", "esc", libghostty.KeyEscape, 0},
-		{"tab", "tab", libghostty.KeyTab, 0},
-		{"backspace", "backspace", libghostty.KeyBackspace, 0},
-		{"up", "up", libghostty.KeyUp, 0},
-		{"down", "down", libghostty.KeyDown, 0},
-		{"left", "left", libghostty.KeyLeft, 0},
-		{"right", "right", libghostty.KeyRight, 0},
-		{"home", "home", libghostty.KeyHome, 0},
-		{"end", "end", libghostty.KeyEnd, 0},
-		{"pageup", "pageup", libghostty.KeyPageUp, 0},
-		{"pgup alias", "pgup", libghostty.KeyPageUp, 0},
-		{"pagedown", "pagedown", libghostty.KeyPageDown, 0},
-		{"pgdn alias", "pgdn", libghostty.KeyPageDown, 0},
-		{"insert", "insert", libghostty.KeyInsert, 0},
-		{"delete", "delete", libghostty.KeyDelete, 0},
-		{"del alias", "del", libghostty.KeyDelete, 0},
-		{"f1", "f1", libghostty.KeyF1, 0},
-		{"f12", "f12", libghostty.KeyF12, 0},
-		{"ctrl+c", "ctrl+c", libghostty.KeyCode('c'), libghostty.ModCtrl},
-		{"control+c", "control+c", libghostty.KeyCode('c'), libghostty.ModCtrl},
-		{"shift+up", "shift+up", libghostty.KeyUp, libghostty.ModShift},
-		{"alt+a", "alt+a", libghostty.KeyCode('a'), libghostty.ModAlt},
-		{"opt+a", "opt+a", libghostty.KeyCode('a'), libghostty.ModAlt},
-		{"option+a", "option+a", libghostty.KeyCode('a'), libghostty.ModAlt},
-		{"super+a", "super+a", libghostty.KeyCode('a'), libghostty.ModSuper},
-		{"cmd+a", "cmd+a", libghostty.KeyCode('a'), libghostty.ModSuper},
-		{"command+a", "command+a", libghostty.KeyCode('a'), libghostty.ModSuper},
-		{"ctrl+shift+up", "ctrl+shift+up", libghostty.KeyUp, libghostty.ModCtrl | libghostty.ModShift},
-		{"case insensitive", "Ctrl+Enter", libghostty.KeyEnter, libghostty.ModCtrl},
-		{"whitespace trimmed", "  ctrl+c  ", libghostty.KeyCode('c'), libghostty.ModCtrl},
+		{"single letter", "a", KeyCode('a'), 0},
+		{"uppercase letter", "A", KeyCode('a'), 0},
+		{"digit", "1", KeyCode('1'), 0},
+		{"space", "space", KeyCode(' '), 0},
+		{"enter", "enter", KeyEnter, 0},
+		{"return alias", "return", KeyEnter, 0},
+		{"escape", "escape", KeyEscape, 0},
+		{"esc alias", "esc", KeyEscape, 0},
+		{"tab", "tab", KeyTab, 0},
+		{"backspace", "backspace", KeyBackspace, 0},
+		{"up", "up", KeyUp, 0},
+		{"down", "down", KeyDown, 0},
+		{"left", "left", KeyLeft, 0},
+		{"right", "right", KeyRight, 0},
+		{"home", "home", KeyHome, 0},
+		{"end", "end", KeyEnd, 0},
+		{"pageup", "pageup", KeyPageUp, 0},
+		{"pgup alias", "pgup", KeyPageUp, 0},
+		{"pagedown", "pagedown", KeyPageDown, 0},
+		{"pgdn alias", "pgdn", KeyPageDown, 0},
+		{"insert", "insert", KeyInsert, 0},
+		{"delete", "delete", KeyDelete, 0},
+		{"del alias", "del", KeyDelete, 0},
+		{"f1", "f1", KeyF1, 0},
+		{"f12", "f12", KeyF12, 0},
+		{"ctrl+c", "ctrl+c", KeyCode('c'), ModCtrl},
+		{"control+c", "control+c", KeyCode('c'), ModCtrl},
+		{"shift+up", "shift+up", KeyUp, ModShift},
+		{"alt+a", "alt+a", KeyCode('a'), ModAlt},
+		{"opt+a", "opt+a", KeyCode('a'), ModAlt},
+		{"option+a", "option+a", KeyCode('a'), ModAlt},
+		{"super+a", "super+a", KeyCode('a'), ModSuper},
+		{"cmd+a", "cmd+a", KeyCode('a'), ModSuper},
+		{"command+a", "command+a", KeyCode('a'), ModSuper},
+		{"ctrl+shift+up", "ctrl+shift+up", KeyUp, ModCtrl | ModShift},
+		{"case insensitive", "Ctrl+Enter", KeyEnter, ModCtrl},
+		{"whitespace trimmed", "  ctrl+c  ", KeyCode('c'), ModCtrl},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

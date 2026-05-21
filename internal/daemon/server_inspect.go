@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -11,7 +10,6 @@ import (
 
 	hauntty "code.selman.me/hauntty"
 	"code.selman.me/hauntty/internal/protocol"
-	"code.selman.me/hauntty/libghostty"
 )
 
 func (s *Server) handleList(conn *protocol.Conn, msg *protocol.List) {
@@ -71,12 +69,9 @@ func (s *Server) handleList(conn *protocol.Conn, msg *protocol.List) {
 }
 
 func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
-	s.mu.RLock()
-	sess, ok := s.sessions[msg.Name]
-	s.mu.RUnlock()
-
+	sess, ok := s.liveSession(msg.Name)
 	if ok {
-		dump, err := sess.dumpScreen(s.ctx, dumpFormat(msg.Format))
+		dump, err := sess.dumpScreen(s.ctx, terminalDumpFormat(msg.Format))
 		if err != nil {
 			writeError(conn, err.Error())
 			return
@@ -100,42 +95,6 @@ func (s *Server) handleDump(conn *protocol.Conn, msg *protocol.Dump) {
 	}
 
 	writeError(conn, "session not found")
-}
-
-func dumpFormat(format protocol.DumpFormat) libghostty.DumpFormat {
-	flags := libghostty.DumpFormat(format) & ^libghostty.DumpFormatMask
-	var wasmFmt libghostty.DumpFormat
-	switch format & protocol.DumpFormatMask {
-	case protocol.DumpVT:
-		wasmFmt = libghostty.DumpVTSafe
-	case protocol.DumpHTML:
-		wasmFmt = libghostty.DumpHTML
-	default:
-		wasmFmt = libghostty.DumpPlain
-	}
-	return wasmFmt | flags
-}
-
-func dumpDeadState(ctx context.Context, rt *libghostty.Runtime, state *sessionState, scrollback uint32, format protocol.DumpFormat) ([]byte, error) {
-	scrollback = max(scrollback, uint32(bytes.Count(state.VT, []byte{'\n'}))+uint32(state.Rows)+1)
-
-	term, err := rt.NewTerminal(uint32(state.Cols), uint32(state.Rows), scrollback)
-	if err != nil {
-		return nil, fmt.Errorf("dump dead state: new terminal: %w", err)
-	}
-	defer term.Close()
-
-	if len(state.VT) > 0 {
-		if err := term.Feed(state.VT); err != nil {
-			return nil, fmt.Errorf("dump dead state: feed vt: %w", err)
-		}
-	}
-
-	dump, err := term.DumpScreen(dumpFormat(format))
-	if err != nil {
-		return nil, fmt.Errorf("dump dead state: dump screen: %w", err)
-	}
-	return dump.Data, nil
 }
 
 func (s *Server) handlePrune(conn *protocol.Conn) {
@@ -227,7 +186,7 @@ func (s *Server) statusSnapshot(sessionName string) (uint32, uint32, *protocol.S
 }
 
 func sessionCWD(ctx context.Context, sess *Session) (string, error) {
-	cwd, ok, err := sess.term.GetCwd()
+	cwd, ok, err := sess.term.cwd()
 	if err != nil {
 		return "", fmt.Errorf("lookup cwd for %s: %w", sess.Name, err)
 	}

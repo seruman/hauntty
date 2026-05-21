@@ -43,7 +43,7 @@ func launchSessionProcess(spec sessionStartSpec) (*sessionLaunch, error) {
 	return &sessionLaunch{ptmx: ptmx, cmd: cmd, tempDir: tempDir}, nil
 }
 
-func startSession(ctx context.Context, launch *sessionLaunch, term *libghostty.Terminal, resizePolicy config.ResizePolicy, spec sessionStartSpec) *Session {
+func startSession(ctx context.Context, launch *sessionLaunch, term *terminalState, resizePolicy config.ResizePolicy, spec sessionStartSpec) *Session {
 	s := &Session{
 		Name:         spec.name,
 		PID:          uint32(launch.cmd.Process.Pid),
@@ -68,14 +68,14 @@ func startSession(ctx context.Context, launch *sessionLaunch, term *libghostty.T
 }
 
 func newSession(ctx context.Context, wasmRT *libghostty.Runtime, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
-	term, err := wasmRT.NewTerminal(uint32(spec.size.cols), uint32(spec.size.rows), spec.scrollback)
+	term, err := newTerminalState(wasmRT, uint32(spec.size.cols), uint32(spec.size.rows), spec.scrollback)
 	if err != nil {
 		return nil, err
 	}
 
 	launch, err := launchSessionProcess(spec)
 	if err != nil {
-		term.Close()
+		term.close()
 		return nil, err
 	}
 
@@ -83,7 +83,7 @@ func newSession(ctx context.Context, wasmRT *libghostty.Runtime, resizePolicy co
 }
 
 func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sessionState, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
-	term, err := wasmRT.NewTerminal(uint32(state.Cols), uint32(state.Rows), spec.scrollback)
+	term, err := restoreTerminalState(wasmRT, state, spec.size, spec.scrollback)
 	if err != nil {
 		return nil, err
 	}
@@ -91,28 +91,9 @@ func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sess
 	cleanup := true
 	defer func() {
 		if cleanup {
-			term.Close()
+			term.close()
 		}
 	}()
-
-	if len(state.VT) > 0 {
-		if err := term.Feed(state.VT); err != nil {
-			return nil, err
-		}
-	}
-	if state.IsAltScreen {
-		if err := term.Feed([]byte("\x1b[?1049l")); err != nil {
-			return nil, err
-		}
-	}
-	if err := term.Feed([]byte("\x1b[!p")); err != nil {
-		return nil, err
-	}
-	if state.Cols != spec.size.cols || state.Rows != spec.size.rows {
-		if err := term.Resize(uint32(spec.size.cols), uint32(spec.size.rows)); err != nil {
-			slog.Warn("wasm resize on restore", "session", spec.name, "err", err)
-		}
-	}
 
 	launch, err := launchSessionProcess(spec)
 	if err != nil {
@@ -125,19 +106,21 @@ func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sess
 
 func (s *Session) feedLoop(ctx context.Context) {
 	for item := range s.feedCh {
-		if err := s.term.Feed(*item.data); err != nil {
+		if err := s.term.feed(*item.data); err != nil {
 			slog.Debug("wasm feed error", "session", s.Name, "err", err)
 		}
-		s.feedApplied.Store(item.seq)
+		if item.applied != nil {
+			close(item.applied)
+		}
 		*item.data = (*item.data)[:cap(*item.data)]
 		feedPool.Put(item.data)
 	}
 }
 
-// waitFeedApplied blocks until feedLoop has applied every PTY chunk up to target.
-func (s *Session) waitFeedApplied(target uint64) {
-	for s.feedApplied.Load() < target {
-		time.Sleep(100 * time.Microsecond)
+// waitFeedApplied blocks until feedLoop has applied the latest accepted PTY chunk.
+func waitFeedApplied(applied <-chan struct{}) {
+	if applied != nil {
+		<-applied
 	}
 }
 
@@ -177,7 +160,7 @@ func (s *Session) run() {
 	// non-nil, we stop reading ptyOut (backpressure) but keep
 	// processing actions so detach/kick/list don't stall.
 	var pendingFeed *feedItem
-	var nextFeedSeq uint64
+	var lastFeedApplied <-chan struct{}
 
 	for {
 		// Nil-channel trick: only one of ptyCh/feedSend is active
@@ -221,8 +204,9 @@ func (s *Session) run() {
 			d := (*bp)[:len(data)]
 			copy(d, data)
 			*bp = d
-			nextFeedSeq++
-			pendingFeed = &feedItem{data: bp, seq: nextFeedSeq}
+			applied := make(chan struct{})
+			pendingFeed = &feedItem{data: bp, applied: applied}
+			lastFeedApplied = applied
 
 		case feedSend <- feedItemToSend:
 			pendingFeed = nil
@@ -238,9 +222,9 @@ func (s *Session) run() {
 					pendingFeed = nil
 				}
 				// Attach dumps must reflect every PTY chunk we've already accepted.
-				s.waitFeedApplied(nextFeedSeq)
+				waitFeedApplied(lastFeedApplied)
 
-				dump, err := s.term.DumpScreen(libghostty.DumpVTFull)
+				dump, err := s.term.dumpScreen(libghostty.DumpVTFull)
 				if err != nil {
 					a.result <- attachResp{err: err}
 					continue
@@ -334,6 +318,9 @@ func (s *Session) run() {
 				// Clients see connection close (EOF), not Exited — this is
 				// the kill/shutdown path.
 				if pendingFeed != nil {
+					if pendingFeed.applied != nil {
+						close(pendingFeed.applied)
+					}
 					feedPool.Put(pendingFeed.data)
 					pendingFeed = nil
 				}
@@ -363,7 +350,7 @@ func (s *Session) close(ctx context.Context) {
 		_ = syscall.Kill(-int(s.PID), syscall.SIGKILL)
 		<-s.done
 	}
-	s.term.Close()
+	s.term.close()
 	if s.tempDir != "" {
 		os.RemoveAll(s.tempDir)
 	}
@@ -379,7 +366,7 @@ func (s *Session) sendInput(data []byte) error {
 }
 
 func (s *Session) dumpScreen(ctx context.Context, format libghostty.DumpFormat) (*libghostty.ScreenDump, error) {
-	return s.term.DumpScreen(format)
+	return s.term.dumpScreen(format)
 }
 
 func exitCodeFromWaitStatus(ws syscall.WaitStatus) int32 {

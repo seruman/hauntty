@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -64,6 +65,22 @@ func TestDecodeStateUnsupportedVersion(t *testing.T) {
 	data := []byte{'H', 'T', 'S', 'T', 99}
 	_, err := decodeState(data)
 	assert.Equal(t, err.Error(), "persist: unsupported version 99")
+}
+
+func TestDecodeStateRejectsOversizedVT(t *testing.T) {
+	state := &sessionState{
+		Cols:    80,
+		Rows:    24,
+		SavedAt: time.Unix(1700000000, 0),
+		VT:      []byte{},
+	}
+
+	data, err := encodeState(state)
+	assert.NilError(t, err)
+	binary.BigEndian.PutUint32(data[len(data)-4:], maxStateVTBytes+1)
+
+	_, err = decodeState(data)
+	assert.Error(t, err, "persist: vt_data too large: 16777217 bytes")
 }
 
 func TestEncodeStateFormat(t *testing.T) {

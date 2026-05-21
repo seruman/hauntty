@@ -27,26 +27,6 @@ func isConnClosed(err error) bool {
 	return errors.As(err, &opErr) && errors.Is(opErr.Err, net.ErrClosed)
 }
 
-var alwaysForwardEnv = []string{
-	"TERM",
-	"SHELL",
-}
-
-func CollectForwardedEnv(extra []string) []string {
-	env := make([]string, 0, len(alwaysForwardEnv)+len(extra))
-	for _, key := range alwaysForwardEnv {
-		if val, ok := os.LookupEnv(key); ok {
-			env = append(env, key+"="+val)
-		}
-	}
-	for _, key := range extra {
-		if val, ok := os.LookupEnv(key); ok {
-			env = append(env, key+"="+val)
-		}
-	}
-	return env
-}
-
 func findDetach(data []byte, dk DetachKey) int {
 	if dk.rawByte != 0 {
 		if i := bytes.IndexByte(data, dk.rawByte); i >= 0 {
@@ -56,94 +36,48 @@ func findDetach(data []byte, dk DetachKey) int {
 	return bytes.Index(data, dk.csiSeq)
 }
 
-func prepareInteractiveAttach(fd int, forwardEnv []string) (protocol.Attach, error) {
-	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
-	if err != nil {
-		return protocol.Attach{}, fmt.Errorf("get terminal size: %w", err)
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return protocol.Attach{}, fmt.Errorf("get cwd: %w", err)
-	}
-
-	return protocol.Attach{
-		Cols:       uint16(ws.Col),
-		Rows:       uint16(ws.Row),
-		Xpixel:     ws.Xpixel,
-		Ypixel:     ws.Ypixel,
-		Env:        CollectForwardedEnv(forwardEnv),
-		CWD:        cwd,
-		Scrollback: 0,
-	}, nil
+type AttachMetadata struct {
+	Cols   uint16
+	Rows   uint16
+	Xpixel uint16
+	Ypixel uint16
+	Env    []string
+	CWD    string
 }
+
+type AttachMetadataFunc func(fd int) (AttachMetadata, error)
 
 // AttachOpts configures an interactive attach session.
 type AttachOpts struct {
-	Name       string
-	Command    []string
-	DetachKey  DetachKey
-	ForwardEnv []string
-	ReadOnly   bool
-	Restore    bool
+	Name      string
+	Command   []string
+	DetachKey DetachKey
+	Metadata  AttachMetadataFunc
+	ReadOnly  bool
+	Restore   bool
 }
 
 func (c *Client) RunAttach(opts AttachOpts) error {
 	fd := int(os.Stdin.Fd())
 
-	req, err := prepareInteractiveAttach(fd, opts.ForwardEnv)
-	if err != nil {
-		return err
-	}
-	req.Name = opts.Name
-	req.Command = opts.Command
-	req.ReadOnly = opts.ReadOnly
-	req.Restore = opts.Restore
-
-	attached, err := c.Attach(&req)
+	req, err := attachRequestFromOpts(fd, opts)
 	if err != nil {
 		return err
 	}
 
-	if attached.Created {
-		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", attached.Name, attached.PID)
-	} else if opts.ReadOnly {
-		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", attached.Name, attached.PID)
-	} else {
-		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", attached.Name, attached.PID)
+	attached, err := c.attach(req)
+	if err != nil {
+		return err
 	}
 
-	// Push kitty keyboard level to isolate inner session keyboard
-	// modes from the host terminal.
-	if _, err := os.Stdout.Write([]byte("\x1b[>0u")); err != nil {
-		return fmt.Errorf("push kitty keyboard: %w", err)
+	writeAttachStatus(attached, opts.ReadOnly)
+
+	if err := pushKittyKeyboard(); err != nil {
+		return err
 	}
 
-	if !attached.Created && len(attached.ScreenDump) > 0 {
-		// Reattach: preserve visible content in scrollback, then
-		// clear for the dump. Query cursor row via DSR so we
-		// scroll exactly the content-bearing rows — no blank
-		// line gap. Then EL-clear every row (ED touches
-		// scrollback in Ghostty, EL does not).
-		// Cooked mode so OPOST translates \n in the dump to \r\n.
-		cursorRow := int(req.Rows) // fallback: scroll everything
-		if tmpState, rerr := term.MakeRaw(fd); rerr == nil {
-			os.Stdout.Write([]byte("\x1b[6n"))
-			cursorRow = readCursorRow(fd, int(req.Rows))
-			_ = term.Restore(fd, tmpState)
-		}
-		scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, cursorRow)...)
-		os.Stdout.Write(scroll)
-		var clear bytes.Buffer
-		for row := 1; row <= int(req.Rows); row++ {
-			fmt.Fprintf(&clear, "\x1b[%d;1H\x1b[2K", row)
-		}
-		clear.WriteString("\x1b[H")
-		os.Stdout.Write(clear.Bytes())
-
-		if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
-			return fmt.Errorf("write state dump: %w", err)
-		}
+	if err := writeReattachScreenDump(fd, req.Rows, attached); err != nil {
+		return err
 	}
 
 	oldState, err := term.MakeRaw(fd)
@@ -162,36 +96,139 @@ func (c *Client) RunAttach(opts AttachOpts) error {
 	)
 
 	if !opts.ReadOnly {
-		sigwinch := make(chan os.Signal, 1)
-		signal.Notify(sigwinch, unix.SIGWINCH)
-
-		go func() {
-			defer signal.Stop(sigwinch)
-			for {
-				select {
-				case <-sigwinch:
-					ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
-					if err != nil {
-						continue
-					}
-					mu.Lock()
-					werr := c.conn.WriteMessage(&protocol.Resize{
-						Cols:   uint16(ws.Col),
-						Rows:   uint16(ws.Row),
-						Xpixel: ws.Xpixel,
-						Ypixel: ws.Ypixel,
-					})
-					mu.Unlock()
-					if werr != nil {
-						return
-					}
-				case <-done:
-					return
-				}
-			}
-		}()
+		c.forwardHostResize(fd, &mu, done)
 	}
 
+	c.forwardHostInput(&mu, opts)
+
+	if err := writeCreatedCommandDump(attached, opts.Command); err != nil {
+		return err
+	}
+
+	for {
+		msg, err := c.conn.ReadMessage()
+		if err != nil {
+			close(done)
+			if err == io.EOF || isConnClosed(err) {
+				restoreHostTerminal(fd, oldState, "[hauntty] detached\n")
+				return nil
+			}
+			_ = term.Restore(fd, oldState)
+			return fmt.Errorf("read message: %w", err)
+		}
+		if err := handleAttachMessage(fd, oldState, msg); err != nil {
+			close(done)
+			return err
+		}
+	}
+}
+
+func attachRequestFromOpts(fd int, opts AttachOpts) (*protocol.Attach, error) {
+	if opts.Metadata == nil {
+		return nil, fmt.Errorf("attach metadata function is required")
+	}
+	metadata, err := opts.Metadata(fd)
+	if err != nil {
+		return nil, err
+	}
+	return &protocol.Attach{
+		Name:       opts.Name,
+		Command:    opts.Command,
+		Cols:       metadata.Cols,
+		Rows:       metadata.Rows,
+		Xpixel:     metadata.Xpixel,
+		Ypixel:     metadata.Ypixel,
+		Env:        metadata.Env,
+		CWD:        metadata.CWD,
+		Scrollback: 0,
+		ReadOnly:   opts.ReadOnly,
+		Restore:    opts.Restore,
+	}, nil
+}
+
+func writeAttachStatus(attached *protocol.Attached, readOnly bool) {
+	if attached.Created {
+		fmt.Fprintf(os.Stderr, "[hauntty] created session %q (pid %d)\n", attached.Name, attached.PID)
+	} else if readOnly {
+		fmt.Fprintf(os.Stderr, "[hauntty] attached read-only to session %q (pid %d)\n", attached.Name, attached.PID)
+	} else {
+		fmt.Fprintf(os.Stderr, "[hauntty] attached to session %q (pid %d)\n", attached.Name, attached.PID)
+	}
+}
+
+func pushKittyKeyboard() error {
+	// Push kitty keyboard level to isolate inner session keyboard
+	// modes from the host terminal.
+	if _, err := os.Stdout.Write([]byte("\x1b[>0u")); err != nil {
+		return fmt.Errorf("push kitty keyboard: %w", err)
+	}
+	return nil
+}
+
+func writeReattachScreenDump(fd int, rows uint16, attached *protocol.Attached) error {
+	if attached.Created || len(attached.ScreenDump) == 0 {
+		return nil
+	}
+
+	// Reattach: preserve visible content in scrollback, then
+	// clear for the dump. Query cursor row via DSR so we
+	// scroll exactly the content-bearing rows — no blank
+	// line gap. Then EL-clear every row (ED touches
+	// scrollback in Ghostty, EL does not).
+	// Cooked mode so OPOST translates \n in the dump to \r\n.
+	cursorRow := int(rows) // fallback: scroll everything
+	if tmpState, rerr := term.MakeRaw(fd); rerr == nil {
+		os.Stdout.Write([]byte("\x1b[6n"))
+		cursorRow = readCursorRow(fd, int(rows))
+		_ = term.Restore(fd, tmpState)
+	}
+	scroll := append([]byte("\x1b[999;1H"), bytes.Repeat([]byte{'\n'}, cursorRow)...)
+	os.Stdout.Write(scroll)
+	var clear bytes.Buffer
+	for row := 1; row <= int(rows); row++ {
+		fmt.Fprintf(&clear, "\x1b[%d;1H\x1b[2K", row)
+	}
+	clear.WriteString("\x1b[H")
+	os.Stdout.Write(clear.Bytes())
+
+	if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
+		return fmt.Errorf("write state dump: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) forwardHostResize(fd int, mu *sync.Mutex, done <-chan struct{}) {
+	sigwinch := make(chan os.Signal, 1)
+	signal.Notify(sigwinch, unix.SIGWINCH)
+
+	go func() {
+		defer signal.Stop(sigwinch)
+		for {
+			select {
+			case <-sigwinch:
+				ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+				if err != nil {
+					continue
+				}
+				mu.Lock()
+				werr := c.conn.WriteMessage(&protocol.Resize{
+					Cols:   uint16(ws.Col),
+					Rows:   uint16(ws.Row),
+					Xpixel: ws.Xpixel,
+					Ypixel: ws.Ypixel,
+				})
+				mu.Unlock()
+				if werr != nil {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+}
+
+func (c *Client) forwardHostInput(mu *sync.Mutex, opts AttachOpts) {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -227,46 +264,33 @@ func (c *Client) RunAttach(opts AttachOpts) error {
 			}
 		}
 	}()
+}
 
-	if attached.Created && len(opts.Command) > 0 && len(attached.ScreenDump) > 0 {
-		if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
-			return fmt.Errorf("write state dump: %w", err)
-		}
-	}
-
-	handleMsg := func(msg protocol.Message) error {
-		switch m := msg.(type) {
-		case *protocol.Output:
-			os.Stdout.Write(m.Data)
-		case *protocol.Exited:
-			restoreHostTerminal(fd, oldState, "[hauntty] session exited\n")
-			return &ExitError{Code: int(m.ExitCode)}
-		case *protocol.Error:
-			_ = term.Restore(fd, oldState)
-			fmt.Fprintf(os.Stderr, "[hauntty] error: %s\n", m.Message)
-			return &ExitError{Code: 1}
-		case *protocol.ClientsChanged:
-			_ = m // informational, no action needed
-		}
+func writeCreatedCommandDump(attached *protocol.Attached, command []string) error {
+	if !attached.Created || len(command) == 0 || len(attached.ScreenDump) == 0 {
 		return nil
 	}
-
-	for {
-		msg, err := c.conn.ReadMessage()
-		if err != nil {
-			close(done)
-			if err == io.EOF || isConnClosed(err) {
-				restoreHostTerminal(fd, oldState, "[hauntty] detached\n")
-				return nil
-			}
-			_ = term.Restore(fd, oldState)
-			return fmt.Errorf("read message: %w", err)
-		}
-		if err := handleMsg(msg); err != nil {
-			close(done)
-			return err
-		}
+	if _, err := os.Stdout.Write(attached.ScreenDump); err != nil {
+		return fmt.Errorf("write state dump: %w", err)
 	}
+	return nil
+}
+
+func handleAttachMessage(fd int, oldState *term.State, msg protocol.Message) error {
+	switch m := msg.(type) {
+	case *protocol.Output:
+		os.Stdout.Write(m.Data)
+	case *protocol.Exited:
+		restoreHostTerminal(fd, oldState, "[hauntty] session exited\n")
+		return &ExitError{Code: int(m.ExitCode)}
+	case *protocol.Error:
+		_ = term.Restore(fd, oldState)
+		fmt.Fprintf(os.Stderr, "[hauntty] error: %s\n", m.Message)
+		return &ExitError{Code: 1}
+	case *protocol.ClientsChanged:
+		_ = m // informational, no action needed
+	}
+	return nil
 }
 
 func restoreHostTerminal(fd int, oldState *term.State, message string) {

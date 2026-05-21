@@ -8,7 +8,6 @@ import (
 	"code.selman.me/hauntty/internal/client"
 	"code.selman.me/hauntty/internal/completion"
 	"code.selman.me/hauntty/internal/config"
-	"code.selman.me/hauntty/internal/protocol"
 	"github.com/alecthomas/kong"
 )
 
@@ -67,13 +66,13 @@ func (cmd *CompletionDataCmd) Run(cfg *config.Config) error {
 	}
 	defer c.Close()
 
-	sessions, err := c.List(false)
+	sessions, err := c.ListSessions(false)
 	if err != nil {
 		// Same graceful degradation: no completions rather than a shell error.
 		return nil
 	}
 
-	for _, name := range completionTopicNames(cmd.Topic, sessions.Sessions) {
+	for _, name := range completionTopicNames(cmd.Topic, sessions) {
 		fmt.Fprintln(os.Stdout, name)
 	}
 	return nil
@@ -92,7 +91,7 @@ func completionDynamicTopics() map[string]string {
 	}
 }
 
-func completionTopicNames(topic string, sessions []protocol.Session) []string {
+func completionTopicNames(topic string, sessions []client.Session) []string {
 	names := make([]string, 0, len(sessions))
 	for _, session := range sessions {
 		if !includeCompletionSession(topic, session) {
@@ -103,12 +102,12 @@ func completionTopicNames(topic string, sessions []protocol.Session) []string {
 	return names
 }
 
-func includeCompletionSession(topic string, session protocol.Session) bool {
+func includeCompletionSession(topic string, session client.Session) bool {
 	switch topic {
 	case "live_sessions":
-		return session.State == protocol.SessionStateRunning
+		return session.State == client.SessionStateRunning
 	case "dead_sessions":
-		return session.State == protocol.SessionStateDead
+		return session.State == client.SessionStateDead
 	case "dumpable_sessions", "sessions":
 		return true
 	default:

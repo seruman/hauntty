@@ -31,7 +31,7 @@ func newSessionLoopHarness(t *testing.T) *Session {
 		assert.NilError(t, rt.Close())
 	})
 
-	term, err := rt.NewTerminal(80, 24, 0)
+	term, err := newTerminalState(rt, 80, 24, 0)
 	assert.NilError(t, err)
 
 	ptmx, tty, err := pty.Open()
@@ -63,7 +63,7 @@ func newSessionLoopHarness(t *testing.T) *Session {
 		<-s.done
 		assert.NilError(t, ptmx.Close())
 		assert.NilError(t, tty.Close())
-		assert.NilError(t, term.Close())
+		assert.NilError(t, term.close())
 	})
 
 	return s

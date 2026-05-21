@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"code.selman.me/hauntty/internal/client"
 	"code.selman.me/hauntty/internal/config"
-	"code.selman.me/hauntty/internal/protocol"
 	"github.com/BurntSushi/toml"
 	"github.com/alecthomas/kong"
+	"github.com/creack/pty"
 	"gotest.tools/v3/assert"
 )
 
@@ -110,6 +111,52 @@ func TestOpenDaemonLogFile(t *testing.T) {
 	})
 }
 
+func TestCollectForwardedEnv(t *testing.T) {
+	values := map[string]string{
+		"TERM":      "xterm-256color",
+		"SHELL":     "/bin/bash",
+		"COLORTERM": "truecolor",
+	}
+	lookup := func(key string) (string, bool) {
+		value, ok := values[key]
+		return value, ok
+	}
+
+	env := collectForwardedEnv([]string{"COLORTERM", "MISSING"}, lookup)
+
+	assert.DeepEqual(t, env, []string{"TERM=xterm-256color", "SHELL=/bin/bash", "COLORTERM=truecolor"})
+}
+
+func TestAttachMetadataFunc(t *testing.T) {
+	master, slave, err := pty.Open()
+	assert.NilError(t, err)
+	defer master.Close()
+	defer slave.Close()
+
+	assert.NilError(t, pty.Setsize(slave, &pty.Winsize{Cols: 132, Rows: 47, X: 900, Y: 700}))
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	lookup := func(key string) (string, bool) {
+		values := map[string]string{
+			"TERM":      "xterm-256color",
+			"SHELL":     "/bin/bash",
+			"COLORTERM": "truecolor",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	metadata, err := attachMetadataFunc([]string{"COLORTERM"}, lookup)(int(slave.Fd()))
+	assert.NilError(t, err)
+	assert.Equal(t, metadata.Cols, uint16(132))
+	assert.Equal(t, metadata.Rows, uint16(47))
+	assert.Equal(t, metadata.Xpixel, uint16(900))
+	assert.Equal(t, metadata.Ypixel, uint16(700))
+	assert.DeepEqual(t, metadata.Env, []string{"TERM=xterm-256color", "SHELL=/bin/bash", "COLORTERM=truecolor"})
+	assert.Equal(t, metadata.CWD, cwd)
+}
+
 func TestDaemonStartArgs(t *testing.T) {
 	t.Run("includes auto-exit and socket", func(t *testing.T) {
 		args := daemonStartArgs("/tmp/hauntty.sock", true)
@@ -140,10 +187,10 @@ func TestEnsureDaemonDetachedReportsEarlyChildExit(t *testing.T) {
 }
 
 func TestSessionListRows(t *testing.T) {
-	sessions := []protocol.Session{
+	sessions := []client.Session{
 		{
 			Name:      "live",
-			State:     protocol.SessionStateRunning,
+			State:     client.SessionStateRunning,
 			Cols:      80,
 			Rows:      24,
 			CWD:       "/home/alice/src/project",
@@ -152,7 +199,7 @@ func TestSessionListRows(t *testing.T) {
 		},
 		{
 			Name:    "dead",
-			State:   protocol.SessionStateDead,
+			State:   client.SessionStateDead,
 			Cols:    100,
 			Rows:    40,
 			CWD:     "/tmp/dead",
@@ -176,13 +223,13 @@ func TestSessionListRows(t *testing.T) {
 
 func TestDumpRequestFormat(t *testing.T) {
 	format := dumpRequestFormat("plain", false, false)
-	assert.Equal(t, format, protocol.DumpFormat(0))
+	assert.Equal(t, format, client.DumpFormat(0))
 
 	format = dumpRequestFormat("vt", true, false)
-	assert.Equal(t, format, protocol.DumpVT|protocol.DumpFlagUnwrap)
+	assert.Equal(t, format, client.DumpVT|client.DumpFlagUnwrap)
 
 	format = dumpRequestFormat("html", true, true)
-	assert.Equal(t, format, protocol.DumpHTML|protocol.DumpFlagUnwrap|protocol.DumpFlagScrollback)
+	assert.Equal(t, format, client.DumpHTML|client.DumpFlagUnwrap|client.DumpFlagScrollback)
 }
 
 func TestCompileWaitMatcher(t *testing.T) {

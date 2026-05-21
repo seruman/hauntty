@@ -3,8 +3,10 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"code.selman.me/hauntty/internal/protocol"
 	"code.selman.me/hauntty/libghostty"
 )
 
@@ -21,7 +22,10 @@ import (
 // [vt_data_length u32][vt_data...]
 var stateMagic = [4]byte{'H', 'T', 'S', 'T'}
 
-const stateVersion = 1
+const (
+	stateVersion    = 1
+	maxStateVTBytes = 16 << 20
+)
 
 type sessionState struct {
 	Cols        uint16
@@ -145,33 +149,33 @@ func writeStateInDir(dir string, name string, state *sessionState) error {
 
 func encodeState(s *sessionState) ([]byte, error) {
 	var buf bytes.Buffer
-	enc := protocol.NewEncoder(&buf)
 
 	buf.Write(stateMagic[:])
-	if err := enc.WriteU8(stateVersion); err != nil {
+	buf.WriteByte(stateVersion)
+	if err := binary.Write(&buf, binary.BigEndian, s.Cols); err != nil {
 		return nil, err
 	}
-	if err := enc.WriteU16(s.Cols); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, s.Rows); err != nil {
 		return nil, err
 	}
-	if err := enc.WriteU16(s.Rows); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, s.CursorRow); err != nil {
 		return nil, err
 	}
-	if err := enc.WriteU32(s.CursorRow); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, s.CursorCol); err != nil {
 		return nil, err
 	}
-	if err := enc.WriteU32(s.CursorCol); err != nil {
+	if s.IsAltScreen {
+		buf.WriteByte(1)
+	} else {
+		buf.WriteByte(0)
+	}
+	if err := binary.Write(&buf, binary.BigEndian, uint64(s.SavedAt.Unix())); err != nil {
 		return nil, err
 	}
-	if err := enc.WriteBool(s.IsAltScreen); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, uint32(len(s.VT))); err != nil {
 		return nil, err
 	}
-	if err := enc.WriteU64(uint64(s.SavedAt.Unix())); err != nil {
-		return nil, err
-	}
-	if err := enc.WriteBytes(s.VT); err != nil {
-		return nil, err
-	}
+	buf.Write(s.VT)
 	return buf.Bytes(), nil
 }
 
@@ -192,9 +196,9 @@ func decodeState(data []byte) (*sessionState, error) {
 		return nil, fmt.Errorf("persist: bad magic %x", data[:4])
 	}
 
-	dec := protocol.NewDecoder(bytes.NewReader(data[4:]))
+	dec := bytes.NewReader(data[4:])
 
-	version, err := dec.ReadU8()
+	version, err := dec.ReadByte()
 	if err != nil {
 		return nil, fmt.Errorf("persist: read version: %w", err)
 	}
@@ -202,32 +206,39 @@ func decodeState(data []byte) (*sessionState, error) {
 		return nil, fmt.Errorf("persist: unsupported version %d", version)
 	}
 
-	cols, err := dec.ReadU16()
-	if err != nil {
+	var cols uint16
+	if err := binary.Read(dec, binary.BigEndian, &cols); err != nil {
 		return nil, fmt.Errorf("persist: read cols: %w", err)
 	}
-	rows, err := dec.ReadU16()
-	if err != nil {
+	var rows uint16
+	if err := binary.Read(dec, binary.BigEndian, &rows); err != nil {
 		return nil, fmt.Errorf("persist: read rows: %w", err)
 	}
-	cursorRow, err := dec.ReadU32()
-	if err != nil {
+	var cursorRow uint32
+	if err := binary.Read(dec, binary.BigEndian, &cursorRow); err != nil {
 		return nil, fmt.Errorf("persist: read cursor_row: %w", err)
 	}
-	cursorCol, err := dec.ReadU32()
-	if err != nil {
+	var cursorCol uint32
+	if err := binary.Read(dec, binary.BigEndian, &cursorCol); err != nil {
 		return nil, fmt.Errorf("persist: read cursor_col: %w", err)
 	}
-	isAlt, err := dec.ReadBool()
+	isAltByte, err := dec.ReadByte()
 	if err != nil {
 		return nil, fmt.Errorf("persist: read is_alt_screen: %w", err)
 	}
-	savedAtUnix, err := dec.ReadU64()
-	if err != nil {
+	var savedAtUnix uint64
+	if err := binary.Read(dec, binary.BigEndian, &savedAtUnix); err != nil {
 		return nil, fmt.Errorf("persist: read saved_at: %w", err)
 	}
-	vt, err := dec.ReadBytes()
-	if err != nil {
+	var vtLen uint32
+	if err := binary.Read(dec, binary.BigEndian, &vtLen); err != nil {
+		return nil, fmt.Errorf("persist: read vt_data: %w", err)
+	}
+	if vtLen > maxStateVTBytes {
+		return nil, fmt.Errorf("persist: vt_data too large: %d bytes", vtLen)
+	}
+	vt := make([]byte, vtLen)
+	if _, err := io.ReadFull(dec, vt); err != nil {
 		return nil, fmt.Errorf("persist: read vt_data: %w", err)
 	}
 
@@ -236,7 +247,7 @@ func decodeState(data []byte) (*sessionState, error) {
 		Rows:        rows,
 		CursorRow:   cursorRow,
 		CursorCol:   cursorCol,
-		IsAltScreen: isAlt,
+		IsAltScreen: isAltByte != 0,
 		SavedAt:     time.Unix(int64(savedAtUnix), 0),
 		VT:          vt,
 	}, nil

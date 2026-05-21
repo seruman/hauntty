@@ -80,7 +80,7 @@ func (s *Server) dumpDeadSession(name string, format protocol.DumpFormat) ([]byt
 		return nil, false, nil
 	}
 
-	data, err := dumpDeadState(s.ctx, s.wasmRT, state, s.defaultScrollback, format)
+	data, err := dumpDeadTerminalState(s.wasmRT, state, s.defaultScrollback, format)
 	if err != nil {
 		return nil, false, err
 	}
@@ -147,4 +147,43 @@ func (s *Server) prepareCreateDeadSession(name string, force bool) error {
 		return fmt.Errorf("clean dead session state: %w", err)
 	}
 	return nil
+}
+
+func (s *Server) prepareRestoreDeadSession(name string) (*sessionState, error) {
+	if name == "" {
+		return nil, fmt.Errorf("name required for restore")
+	}
+	if s.persister == nil {
+		return nil, fmt.Errorf("persistence is disabled")
+	}
+
+	s.mu.RLock()
+	_, running := s.sessions[name]
+	s.mu.RUnlock()
+	if running {
+		return nil, fmt.Errorf("session is running")
+	}
+
+	state, exists, err := s.readDeadSession(name)
+	if err != nil {
+		return nil, fmt.Errorf("load saved state: %w", err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("no saved state")
+	}
+	return state, nil
+}
+
+func (s *Server) commitRestoreDeadSession(name string) error {
+	if err := s.removeDeadSession(name); err != nil {
+		return fmt.Errorf("clean dead session state: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) rollbackRestoreDeadSession(name string, state *sessionState, err error) error {
+	if restoreErr := s.writeDeadSession(name, state); restoreErr != nil {
+		return fmt.Errorf("%w; restore dead session state: %v", err, restoreErr)
+	}
+	return err
 }

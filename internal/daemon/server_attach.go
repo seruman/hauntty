@@ -27,35 +27,24 @@ func (s *Server) handleCreate(conn *protocol.Conn, msg *protocol.Create) {
 		return
 	}
 
-	scrollback := msg.Scrollback
-	if scrollback == 0 {
-		scrollback = s.defaultScrollback
-	}
-
 	sess, err := newSession(s.ctx, s.wasmRT, s.resizePolicy, sessionStartSpec{
 		name:       name,
 		command:    msg.Command,
 		env:        msg.Env,
 		cwd:        msg.CWD,
 		size:       termSize{cols: 80, rows: 24},
-		scrollback: scrollback,
+		scrollback: s.scrollback(msg.Scrollback),
 	})
 	if err != nil {
 		writeError(conn, err.Error())
 		return
 	}
 
-	s.mu.Lock()
-	if _, exists := s.sessions[name]; exists {
-		s.mu.Unlock()
+	if !s.addSession(name, sess) {
 		sess.close(s.ctx)
 		writeError(conn, "session already exists")
 		return
 	}
-	s.sessions[name] = sess
-	s.mu.Unlock()
-
-	s.watchSession(sess)
 
 	if err := conn.WriteMessage(&protocol.Created{Name: name, PID: sess.PID}); err != nil {
 		slog.Debug("write created response", "err", err)
@@ -93,34 +82,25 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 			return nil, nil, false, fmt.Errorf("dead session state exists for %q", name)
 		}
 
-		scrollback := msg.Scrollback
-		if scrollback == 0 {
-			scrollback = s.defaultScrollback
-		}
-
 		sess, err = newSession(s.ctx, s.wasmRT, s.resizePolicy, sessionStartSpec{
 			name:       name,
 			command:    msg.Command,
 			env:        msg.Env,
 			cwd:        msg.CWD,
 			size:       size,
-			scrollback: scrollback,
+			scrollback: s.scrollback(msg.Scrollback),
 		})
 		if err != nil {
 			writeError(conn, err.Error())
 			return nil, nil, false, err
 		}
 
-		s.mu.Lock()
-		if existing, ok := s.sessions[name]; ok {
-			s.mu.Unlock()
+		existing, inserted := s.insertSessionOrExisting(name, sess)
+		if !inserted {
 			sess.close(s.ctx)
 			sess = existing
 		} else {
-			s.sessions[name] = sess
 			created = true
-			s.mu.Unlock()
-			s.watchSession(sess)
 		}
 	}
 
@@ -134,53 +114,25 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 	})
 	if err != nil {
 		if created {
-			s.mu.Lock()
-			delete(s.sessions, name)
-			s.mu.Unlock()
+			s.removeSession(name)
 			sess.close(s.ctx)
 		}
 		writeError(conn, err.Error())
 		return nil, nil, false, err
 	}
 
+	if created {
+		s.watchSession(sess)
+	}
 	return sess, ac, msg.ReadOnly, nil
 }
 
 func (s *Server) handleAttachRestore(conn *protocol.Conn, closeConn func() error, msg *protocol.Attach, clientRev string) (*Session, *sessionClient, bool, error) {
 	name := msg.Name
-	if name == "" {
-		writeError(conn, "name required for restore")
-		return nil, nil, false, fmt.Errorf("name required for restore")
-	}
-
-	if s.persister == nil {
-		writeError(conn, "persistence is disabled")
-		return nil, nil, false, fmt.Errorf("persistence is disabled")
-	}
-
-	s.mu.RLock()
-	_, running := s.sessions[name]
-	s.mu.RUnlock()
-
-	if running {
-		writeError(conn, "session is running")
-		return nil, nil, false, fmt.Errorf("session %q is running", name)
-	}
-
-	state, exists, err := s.readDeadSession(name)
+	state, err := s.prepareRestoreDeadSession(name)
 	if err != nil {
-		err = fmt.Errorf("load saved state: %w", err)
 		writeError(conn, err.Error())
 		return nil, nil, false, err
-	}
-	if !exists {
-		writeError(conn, "no saved state")
-		return nil, nil, false, fmt.Errorf("no saved state for %q", name)
-	}
-
-	scrollback := msg.Scrollback
-	if scrollback == 0 {
-		scrollback = s.defaultScrollback
 	}
 
 	size := termSize{cols: msg.Cols, rows: msg.Rows, xpixel: msg.Xpixel, ypixel: msg.Ypixel}
@@ -191,34 +143,25 @@ func (s *Server) handleAttachRestore(conn *protocol.Conn, closeConn func() error
 		env:        msg.Env,
 		cwd:        msg.CWD,
 		size:       size,
-		scrollback: scrollback,
+		scrollback: s.scrollback(msg.Scrollback),
 	})
 	if err != nil {
 		writeError(conn, err.Error())
 		return nil, nil, false, err
 	}
 
-	s.mu.Lock()
-	if _, exists := s.sessions[name]; exists {
-		s.mu.Unlock()
+	if !s.insertSession(name, sess) {
 		sess.close(s.ctx)
 		writeError(conn, "session already exists")
 		return nil, nil, false, fmt.Errorf("session %q created by another client during restore", name)
 	}
-	s.sessions[name] = sess
-	s.mu.Unlock()
 
-	if err := s.removeDeadSession(name); err != nil {
-		s.mu.Lock()
-		delete(s.sessions, name)
-		s.mu.Unlock()
+	if err := s.commitRestoreDeadSession(name); err != nil {
+		s.removeSession(name)
 		sess.close(s.ctx)
-		err = fmt.Errorf("clean dead session state: %w", err)
 		writeError(conn, err.Error())
 		return nil, nil, false, err
 	}
-
-	s.watchSession(sess)
 
 	ac, err := sess.attach(s.ctx, sessionAttachSpec{
 		conn:      conn,
@@ -228,21 +171,57 @@ func (s *Server) handleAttachRestore(conn *protocol.Conn, closeConn func() error
 		readOnly:  msg.ReadOnly,
 	})
 	if err != nil {
-		s.mu.Lock()
-		delete(s.sessions, name)
-		s.mu.Unlock()
+		s.removeSession(name)
 		sess.close(s.ctx)
-		if restoreErr := s.writeDeadSession(name, state); restoreErr != nil {
-			err = fmt.Errorf("%w; restore dead session state: %v", err, restoreErr)
-		}
+		err = s.rollbackRestoreDeadSession(name, state, err)
 		writeError(conn, err.Error())
 		return nil, nil, false, err
 	}
 
+	s.watchSession(sess)
 	return sess, ac, msg.ReadOnly, nil
 }
 
+func (s *Server) scrollback(requested uint32) uint32 {
+	if requested == 0 {
+		return s.defaultScrollback
+	}
+	return requested
+}
+
+func (s *Server) addSession(name string, sess *Session) bool {
+	_, inserted := s.insertSessionOrExisting(name, sess)
+	if !inserted {
+		return false
+	}
+	s.watchSession(sess)
+	return true
+}
+
+func (s *Server) insertSession(name string, sess *Session) bool {
+	_, inserted := s.insertSessionOrExisting(name, sess)
+	return inserted
+}
+
+func (s *Server) insertSessionOrExisting(name string, sess *Session) (*Session, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, exists := s.sessions[name]; exists {
+		return existing, false
+	}
+	s.sessions[name] = sess
+	return nil, true
+}
+
+func (s *Server) removeSession(name string) {
+	s.mu.Lock()
+	delete(s.sessions, name)
+	s.mu.Unlock()
+}
+
 func (s *Server) watchSession(sess *Session) {
+	// Start watching only after the caller has committed the session.
+	// Failed create, Attach, and Restore paths close sessions without persistence or auto-exit side effects.
 	go func() {
 		<-sess.done
 		if s.persister != nil && s.ctx.Err() == nil {

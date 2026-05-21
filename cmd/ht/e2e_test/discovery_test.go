@@ -11,7 +11,6 @@ import (
 
 	"code.selman.me/hauntty/internal/client"
 	"code.selman.me/hauntty/internal/config"
-	"code.selman.me/hauntty/internal/protocol"
 	"code.selman.me/hauntty/internal/termtest"
 	"code.selman.me/hauntty/libghostty"
 	"gotest.tools/v3/assert"
@@ -43,11 +42,11 @@ func TestListSessionsFiltering(t *testing.T) {
 	assert.NilError(t, err)
 	defer c.Close()
 
-	sessions, err := c.List(false)
+	sessions, err := c.ListSessions(false)
 	assert.NilError(t, err)
 
-	rowsByName := make(map[string]protocol.Session, len(sessions.Sessions))
-	for _, s := range sessions.Sessions {
+	rowsByName := make(map[string]client.Session, len(sessions))
+	for _, s := range sessions {
 		rowsByName[s.Name] = s
 	}
 
@@ -70,7 +69,7 @@ func TestListSessionsFiltering(t *testing.T) {
 	} else {
 		t.Logf("resolve home dir: %v", err)
 	}
-	formatRow := func(s protocol.Session) []string {
+	formatRow := func(s client.Session) []string {
 		cwd := s.CWD
 		if home != "" && strings.HasPrefix(cwd, home) {
 			cwd = "~" + cwd[len(home):]

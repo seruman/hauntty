@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"code.selman.me/hauntty/internal/protocol"
+	"code.selman.me/hauntty/internal/client"
 	"gotest.tools/v3/assert"
 )
 
@@ -23,10 +23,10 @@ func TestCompletionDynamicTopics(t *testing.T) {
 }
 
 func TestCompletionTopicNames(t *testing.T) {
-	sessions := []protocol.Session{
-		{Name: "live-a", State: protocol.SessionStateRunning},
-		{Name: "dead-a", State: protocol.SessionStateDead},
-		{Name: "live-b", State: protocol.SessionStateRunning},
+	sessions := []client.Session{
+		{Name: "live-a", State: client.SessionStateRunning},
+		{Name: "dead-a", State: client.SessionStateDead},
+		{Name: "live-b", State: client.SessionStateRunning},
 	}
 
 	t.Run("sessions", func(t *testing.T) {

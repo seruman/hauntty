@@ -10,7 +10,6 @@ import (
 
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
-	"code.selman.me/hauntty/libghostty"
 	"github.com/creack/pty"
 )
 
@@ -22,8 +21,8 @@ var feedPool = sync.Pool{
 }
 
 type feedItem struct {
-	data *[]byte
-	seq  uint64
+	data    *[]byte
+	applied chan struct{}
 }
 
 type termSize struct {
@@ -110,15 +109,14 @@ type Session struct {
 
 	ptmx    *os.File
 	cmd     *exec.Cmd
-	term    *libghostty.Terminal
+	term    *terminalState
 	feedCh  chan feedItem
 	tempDir string
 
-	actions     chan sessionAction
-	ptyOut      chan []byte
-	done        chan struct{}
-	exitCode    int32
-	feedApplied atomic.Uint64
+	actions  chan sessionAction
+	ptyOut   chan []byte
+	done     chan struct{}
+	exitCode int32
 
 	// sizeVal packs cols|rows as (cols<<16)|rows for lock-free reads.
 	sizeVal atomic.Uint32
