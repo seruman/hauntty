@@ -10,7 +10,7 @@ import (
 func ProbeDaemon(sock string) (bool, error) {
 	c, err := Connect(sock)
 	if err != nil {
-		if daemonUnavailable(err) {
+		if DaemonUnavailable(err) {
 			return false, nil
 		}
 		return false, err
@@ -19,7 +19,7 @@ func ProbeDaemon(sock string) (bool, error) {
 	return true, nil
 }
 
-func daemonUnavailable(err error) bool {
+func DaemonUnavailable(err error) bool {
 	var opErr *net.OpError
 	if !errors.As(err, &opErr) {
 		return false

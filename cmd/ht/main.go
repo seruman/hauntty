@@ -134,6 +134,9 @@ type ListCmd struct {
 func (cmd *ListCmd) Run(cfg *config.Config) error {
 	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
+		if client.DaemonUnavailable(err) {
+			return &commandExitError{code: 1, stderr: "can't connect to socket, daemon probably not running\n"}
+		}
 		return err
 	}
 	defer c.Close()
@@ -365,6 +368,9 @@ type StatusCmd struct{}
 func (cmd *StatusCmd) Run(cfg *config.Config) error {
 	c, err := client.Connect(cfg.Daemon.SocketPath)
 	if err != nil {
+		if client.DaemonUnavailable(err) {
+			return &commandExitError{code: 1, stderr: "can't connect to socket, daemon probably not running\n"}
+		}
 		return err
 	}
 	defer c.Close()

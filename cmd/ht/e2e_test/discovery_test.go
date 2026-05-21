@@ -149,11 +149,11 @@ func TestAttachInsideSession(t *testing.T) {
 func TestCommandsWithoutDaemon(t *testing.T) {
 	e := setup(t, nil)
 
-	errText := "ht: error: connect to daemon: dial unix " + e.sock + ": connect: no such file or directory\n"
+	message := "can't connect to socket, daemon probably not running\n"
 
 	list := e.run("list")
-	list.Assert(t, icmd.Expected{ExitCode: 1, Err: errText})
+	list.Assert(t, icmd.Expected{ExitCode: 1, Err: message})
 
 	status := e.run("status")
-	status.Assert(t, icmd.Expected{ExitCode: 1, Err: errText})
+	status.Assert(t, icmd.Expected{ExitCode: 1, Err: message})
 }

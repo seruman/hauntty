@@ -130,7 +130,7 @@ func TestPrepareCreateDeadSession_NoForceErrorsWhenStateExists(t *testing.T) {
 	}
 
 	err := srv.prepareCreateDeadSession("existing", false)
-	assert.Error(t, err, "dead session state exists")
+	assert.Error(t, err, "dead session state exists for \"existing\"; restore it with `ht restore existing`, or discard it with `ht new -f existing ...`")
 }
 
 func TestPrepareCreateDeadSession_NoForceNoState(t *testing.T) {

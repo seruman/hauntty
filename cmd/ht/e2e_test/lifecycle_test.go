@@ -298,7 +298,7 @@ func TestNewForceOverDeadState(t *testing.T) {
 	e.waitForStateFile("force-me")
 
 	second := e.run("new", "force-me")
-	second.Assert(t, icmd.Expected{ExitCode: 1, Err: "create: dead session state exists"})
+	second.Assert(t, icmd.Expected{ExitCode: 1, Err: "create: dead session state exists for \"force-me\"; restore it with `ht restore force-me`, or discard it with `ht new -f force-me ...`"})
 
 	forced := e.run("new", "force-me", "--force")
 	forced.Assert(t, icmd.Expected{ExitCode: 0, Out: "created session \"force-me\""})

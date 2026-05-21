@@ -138,7 +138,7 @@ func (s *Server) prepareCreateDeadSession(name string, force bool) error {
 		return fmt.Errorf("load dead session state: %w", err)
 	}
 	if exists && !force {
-		return fmt.Errorf("dead session state exists")
+		return fmt.Errorf("%s", deadSessionStateExistsMessage(name))
 	}
 	if !force {
 		return nil
@@ -147,6 +147,10 @@ func (s *Server) prepareCreateDeadSession(name string, force bool) error {
 		return fmt.Errorf("clean dead session state: %w", err)
 	}
 	return nil
+}
+
+func deadSessionStateExistsMessage(name string) string {
+	return fmt.Sprintf("dead session state exists for %q; restore it with `ht restore %s`, or discard it with `ht new -f %s ...`", name, name, name)
 }
 
 func (s *Server) prepareRestoreDeadSession(name string) (*sessionState, error) {

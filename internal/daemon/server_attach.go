@@ -78,8 +78,9 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 			writeError(conn, err.Error())
 			return nil, nil, false, err
 		case exists:
-			writeError(conn, "dead session state exists")
-			return nil, nil, false, fmt.Errorf("dead session state exists for %q", name)
+			err = fmt.Errorf("%s", deadSessionStateExistsMessage(name))
+			writeError(conn, err.Error())
+			return nil, nil, false, err
 		}
 
 		sess, err = newSession(s.ctx, s.wasmRT, s.resizePolicy, sessionStartSpec{
