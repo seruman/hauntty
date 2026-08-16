@@ -25,8 +25,7 @@ func DaemonUnavailable(err error) bool {
 		return false
 	}
 
-	var sysErr *os.SyscallError
-	if errors.As(opErr.Err, &sysErr) {
+	if sysErr, ok := errors.AsType[*os.SyscallError](opErr.Err); ok {
 		err = sysErr.Err
 	} else {
 		err = opErr.Err

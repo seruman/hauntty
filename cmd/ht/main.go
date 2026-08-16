@@ -647,10 +647,12 @@ func isInteractiveAttachTTY() bool {
 }
 
 type exitCoder interface {
+	error
 	ExitCode() int
 }
 
 type stderrProvider interface {
+	error
 	Stderr() string
 }
 
@@ -701,10 +703,8 @@ func main() {
 		return
 	}
 
-	var ec exitCoder
-	if errors.As(err, &ec) {
-		var sp stderrProvider
-		if errors.As(err, &sp) {
+	if ec, ok := errors.AsType[exitCoder](err); ok {
+		if sp, ok := errors.AsType[stderrProvider](err); ok {
 			if stderr := sp.Stderr(); stderr != "" {
 				fmt.Fprint(os.Stderr, stderr)
 			}

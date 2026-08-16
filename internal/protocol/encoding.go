@@ -8,7 +8,7 @@ import (
 
 type Encoder struct {
 	w   io.Writer
-	buf [8]byte
+	buf [4]byte
 }
 
 func NewEncoder(w io.Writer) *Encoder {
@@ -30,12 +30,6 @@ func (e *Encoder) WriteU16(v uint16) error {
 func (e *Encoder) WriteU32(v uint32) error {
 	binary.BigEndian.PutUint32(e.buf[:4], v)
 	_, err := e.w.Write(e.buf[:4])
-	return err
-}
-
-func (e *Encoder) WriteU64(v uint64) error {
-	binary.BigEndian.PutUint64(e.buf[:8], v)
-	_, err := e.w.Write(e.buf[:8])
 	return err
 }
 
@@ -94,7 +88,7 @@ func (e *Encoder) WriteBytes(v []byte) error {
 
 type Decoder struct {
 	r   io.Reader
-	buf [8]byte
+	buf [4]byte
 }
 
 func NewDecoder(r io.Reader) *Decoder {
@@ -120,13 +114,6 @@ func (d *Decoder) ReadU32() (uint32, error) {
 		return 0, err
 	}
 	return binary.BigEndian.Uint32(d.buf[:4]), nil
-}
-
-func (d *Decoder) ReadU64() (uint64, error) {
-	if _, err := io.ReadFull(d.r, d.buf[:8]); err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint64(d.buf[:8]), nil
 }
 
 func (d *Decoder) ReadI32() (int32, error) {
