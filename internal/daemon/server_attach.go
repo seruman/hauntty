@@ -235,6 +235,7 @@ func (s *Server) watchSession(sess *Session) {
 		empty := len(s.sessions) == 0
 		s.mu.Unlock()
 		if s.autoExit && empty {
+			sess.waitClients()
 			slog.Info("auto-exit: last session ended, shutting down")
 			s.Shutdown()
 		}

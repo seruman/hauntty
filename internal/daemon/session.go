@@ -15,7 +15,7 @@ import (
 
 var feedPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, 32*1024)
+		b := make([]byte, ptyBatchSize)
 		return &b
 	},
 }
@@ -45,6 +45,9 @@ type sessionClient struct {
 	version   string
 	readOnly  bool
 	outCh     chan protocol.Message
+	ready     chan<- struct{}
+	writeDone chan struct{}
+	final     protocol.Message
 }
 
 type sessionAction interface {
@@ -107,22 +110,26 @@ type Session struct {
 	PID       uint32
 	CreatedAt time.Time
 
-	ptmx    *os.File
-	cmd     *exec.Cmd
-	term    *terminalState
-	feedCh  chan feedItem
-	tempDir string
+	ptmx     *os.File
+	cmd      *exec.Cmd
+	term     *terminalState
+	feedCh   chan feedItem
+	feedDone chan struct{}
+	ptyDone  chan struct{}
+	tempDir  string
 
-	actions  chan sessionAction
-	ptyOut   chan []byte
-	done     chan struct{}
-	exitCode int32
+	actions     chan sessionAction
+	ptyOut      chan []byte
+	clientReady chan struct{}
+	done        chan struct{}
+	exitCode    int32
 
 	// sizeVal packs cols|rows as (cols<<16)|rows for lock-free reads.
 	sizeVal atomic.Uint32
 
-	resizePolicy config.ResizePolicy
-	ctx          context.Context
+	resizePolicy  config.ResizePolicy
+	clientWriters sync.WaitGroup
+	ctx           context.Context
 }
 
 func (s *Session) size() (uint16, uint16) {

@@ -52,9 +52,12 @@ func startSession(ctx context.Context, launch *sessionLaunch, term *terminalStat
 		cmd:          launch.cmd,
 		term:         term,
 		feedCh:       make(chan feedItem, 64),
+		feedDone:     make(chan struct{}),
+		ptyDone:      make(chan struct{}),
 		tempDir:      launch.tempDir,
 		actions:      make(chan sessionAction, 16),
 		ptyOut:       make(chan []byte, 64),
+		clientReady:  make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		resizePolicy: resizePolicy,
 		ctx:          ctx,
@@ -105,6 +108,7 @@ func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sess
 }
 
 func (s *Session) feedLoop(ctx context.Context) {
+	defer close(s.feedDone)
 	for item := range s.feedCh {
 		if err := s.term.feed(*item.data); err != nil {
 			slog.Debug("wasm feed error", "session", s.Name, "err", err)
@@ -124,15 +128,41 @@ func waitFeedApplied(applied <-chan struct{}) {
 	}
 }
 
+const (
+	ptyReadSize       = 32 * 1024
+	ptyBatchSize      = 64 * 1024
+	ptyBatchThreshold = 1024
+	ptyBatchWindow    = 3 * time.Millisecond
+)
+
+// ptyRead owns the gather stage. readPTY exits at process EOF or after
+// Session.close closes the PTY, and ptyDone joins process reaping.
 func (s *Session) ptyRead() {
-	buf := make([]byte, 32*1024)
+	reads := make(chan []byte)
+	go s.readPTY(reads)
+	gatherPTYReads(reads, s.ptyOut, s.done)
+}
+
+func (s *Session) readPTY(reads chan<- []byte) {
+	defer func() {
+		_ = s.cmd.Wait()
+		if s.cmd.ProcessState != nil {
+			if ws, ok := s.cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+				s.exitCode = exitCodeFromWaitStatus(ws)
+			}
+		}
+		close(reads)
+		close(s.ptyDone)
+	}()
+
+	buf := make([]byte, ptyReadSize)
 	for {
 		n, err := s.ptmx.Read(buf)
 		if n > 0 {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 			select {
-			case s.ptyOut <- data:
+			case reads <- data:
 			case <-s.done:
 				return
 			}
@@ -141,12 +171,84 @@ func (s *Session) ptyRead() {
 			break
 		}
 	}
+}
 
-	_ = s.cmd.Wait()
-	if ws, ok := s.cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
-		s.exitCode = exitCodeFromWaitStatus(ws)
+func gatherPTYReads(reads <-chan []byte, batches chan<- []byte, done <-chan struct{}) {
+	defer close(batches)
+
+	var pending []byte
+	readsClosed := false
+	for {
+		var first []byte
+		if len(pending) > 0 {
+			first = pending
+			pending = nil
+		} else {
+			if readsClosed {
+				return
+			}
+			var ok bool
+			select {
+			case first, ok = <-reads:
+				if !ok {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+
+		if len(first) < ptyBatchThreshold {
+			select {
+			case batches <- first:
+			case <-done:
+				return
+			}
+			continue
+		}
+
+		batch := make([]byte, 0, ptyBatchSize)
+		if len(first) > ptyBatchSize {
+			batch = append(batch, first[:ptyBatchSize]...)
+			pending = first[ptyBatchSize:]
+		} else {
+			batch = append(batch, first...)
+		}
+
+		timer := time.NewTimer(ptyBatchWindow)
+	gather:
+		for len(batch) < ptyBatchSize && len(pending) == 0 && !readsClosed {
+			select {
+			case next, ok := <-reads:
+				if !ok {
+					readsClosed = true
+					break gather
+				}
+				remaining := ptyBatchSize - len(batch)
+				if len(next) > remaining {
+					batch = append(batch, next[:remaining]...)
+					pending = next[remaining:]
+					break gather
+				}
+				batch = append(batch, next...)
+			case <-timer.C:
+				timer = nil
+				break gather
+			case <-done:
+				timer.Stop()
+				return
+			}
+		}
+		if timer != nil {
+			timer.Stop()
+		}
+
+		select {
+		case batches <- batch:
+		case <-done:
+			return
+		}
 	}
-	close(s.ptyOut)
 }
 
 // run owns client state; connection writes go through per-client outCh.
@@ -161,18 +263,39 @@ func (s *Session) run() {
 	// processing actions so detach/kick/list don't stall.
 	var pendingFeed *feedItem
 	var lastFeedApplied <-chan struct{}
+	var pendingOutput *protocol.Output
+	var pendingClients []*sessionClient
 
 	for {
-		// Nil-channel trick: only one of ptyCh/feedSend is active
-		// at a time. When pendingFeed is nil, read ptyOut. When
-		// non-nil, send to feedCh. Actions are always processed.
+		var clientsChanged bool
+		clients, pendingClients, clientsChanged = pruneFinishedClients(clients, pendingClients)
+		if clientsChanged {
+			notifyClientsChanged(clients, s.size)
+		}
+		if len(pendingClients) == 0 {
+			pendingOutput = nil
+		}
+		if pendingOutput != nil {
+			pendingClients = queueOutput(pendingClients, pendingOutput)
+			if len(pendingClients) == 0 {
+				pendingOutput = nil
+			}
+		}
+
+		// Nil channels stop PTY intake while terminal feed or client
+		// delivery is backpressured. Session actions remain responsive.
 		var ptyCh <-chan []byte
 		var feedSend chan<- feedItem
 		var feedItemToSend feedItem
+		var clientReady <-chan struct{}
 		if pendingFeed != nil {
 			feedSend = s.feedCh
 			feedItemToSend = *pendingFeed
-		} else {
+		}
+		if pendingOutput != nil {
+			clientReady = s.clientReady
+		}
+		if pendingFeed == nil && pendingOutput == nil {
 			ptyCh = s.ptyOut
 		}
 
@@ -181,24 +304,19 @@ func (s *Session) run() {
 			if !ok {
 				waitFeedApplied(lastFeedApplied)
 				close(s.feedCh)
+				<-s.feedDone
 				exitMsg := &protocol.Exited{ExitCode: s.exitCode}
 				for _, c := range clients {
-					select {
-					case c.outCh <- exitMsg:
-						close(c.outCh)
-					default:
-						close(c.outCh)
-						_ = c.closeConn()
-					}
+					c.final = exitMsg
+					close(c.outCh)
 				}
 				return
 			}
 
 			msg := &protocol.Output{Data: data}
-			before := len(clients)
-			clients = broadcastOutput(clients, s.Name, msg)
-			if len(clients) != before {
-				notifyClientsChanged(clients, s.size)
+			pendingClients = queueOutput(clients, msg)
+			if len(pendingClients) > 0 {
+				pendingOutput = msg
 			}
 
 			bp := feedPool.Get().(*[]byte)
@@ -212,7 +330,16 @@ func (s *Session) run() {
 		case feedSend <- feedItemToSend:
 			pendingFeed = nil
 
+		case <-clientReady:
+
 		case action := <-s.actions:
+			clients, pendingClients, clientsChanged = pruneFinishedClients(clients, pendingClients)
+			if clientsChanged {
+				notifyClientsChanged(clients, s.size)
+			}
+			if len(pendingClients) == 0 {
+				pendingOutput = nil
+			}
 			switch a := action.(type) {
 			case attachReq:
 				if !a.spec.readOnly {
@@ -243,8 +370,12 @@ func (s *Session) run() {
 					version:   a.spec.version,
 					readOnly:  a.spec.readOnly,
 					outCh:     make(chan protocol.Message, sessionClientOutBufferSize),
+					ready:     s.clientReady,
+					writeDone: make(chan struct{}),
 				}
-				go sc.writeLoop()
+				s.clientWriters.Go(func() {
+					sc.writeLoop()
+				})
 
 				// Attached is the first message on outCh, guaranteed
 				// to precede any Output since the client isn't in the
@@ -276,6 +407,10 @@ func (s *Session) run() {
 				if len(clients) == before {
 					continue // already removed (e.g., kicked)
 				}
+				pendingClients = removeClient(pendingClients, a.client)
+				if len(pendingClients) == 0 {
+					pendingOutput = nil
+				}
 				close(a.client.outCh)
 				s.arbitrateResize(clients)
 				notifyClientsChanged(clients, s.size)
@@ -293,6 +428,10 @@ func (s *Session) run() {
 					continue
 				}
 				clients = removeClient(clients, target)
+				pendingClients = removeClient(pendingClients, target)
+				if len(pendingClients) == 0 {
+					pendingOutput = nil
+				}
 				close(target.outCh)
 				_ = target.closeConn()
 				s.arbitrateResize(clients)
@@ -326,6 +465,7 @@ func (s *Session) run() {
 					pendingFeed = nil
 				}
 				close(s.feedCh)
+				<-s.feedDone
 				for _, c := range clients {
 					close(c.outCh)
 					_ = c.closeConn()
@@ -344,17 +484,23 @@ func (s *Session) close(ctx context.Context) {
 
 	s.kill()
 	s.ptmx.Close() // unblock ptyRead if blocked on Read
+	<-s.done
 	select {
-	case <-s.done:
+	case <-s.ptyDone:
 	case <-time.After(5 * time.Second):
 		slog.Warn("child ignored SIGHUP, sending SIGKILL", "session", s.Name)
 		_ = syscall.Kill(-int(s.PID), syscall.SIGKILL)
-		<-s.done
+		<-s.ptyDone
 	}
+	s.clientWriters.Wait()
 	s.term.close()
 	if s.tempDir != "" {
 		os.RemoveAll(s.tempDir)
 	}
+}
+
+func (s *Session) waitClients() {
+	s.clientWriters.Wait()
 }
 
 func (s *Session) kill() {

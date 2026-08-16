@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"io"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +16,16 @@ import (
 )
 
 type discardRW struct{}
+
+type failingRW struct{}
+
+func (failingRW) Read(_ []byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (failingRW) Write(_ []byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
 
 func (discardRW) Read(_ []byte) (int, error) {
 	return 0, io.EOF
@@ -44,8 +56,10 @@ func newSessionLoopHarness(t *testing.T) *Session {
 		ptmx:         ptmx,
 		term:         term,
 		feedCh:       make(chan feedItem, 64),
+		feedDone:     make(chan struct{}),
 		actions:      make(chan sessionAction, 16),
 		ptyOut:       make(chan []byte, 64),
+		clientReady:  make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		resizePolicy: config.ResizePolicySmallest,
 		ctx:          ctx,
@@ -117,6 +131,27 @@ func TestSessionKickClientClosesConnectionAndRemovesClient(t *testing.T) {
 	assert.Equal(t, kicked, false)
 }
 
+func TestSessionRemovesClientAfterWriteFailure(t *testing.T) {
+	s := newSessionLoopHarness(t)
+
+	closed := make(chan struct{})
+	client, err := s.attach(t.Context(), sessionAttachSpec{
+		conn: protocol.NewConn(failingRW{}),
+		closeConn: func() error {
+			close(closed)
+			return nil
+		},
+		size:     termSize{cols: 80, rows: 24},
+		version:  "failed-writer",
+		readOnly: true,
+	})
+	assert.NilError(t, err)
+	<-closed
+	<-client.writeDone
+
+	assert.DeepEqual(t, s.clientInfo(), []protocol.SessionClient{})
+}
+
 func TestSessionWritableAttachResizesAndReadOnlyAttachDoesNot(t *testing.T) {
 	s := newSessionLoopHarness(t)
 
@@ -181,6 +216,63 @@ func TestSessionResizeClientIgnoresReadOnlyClients(t *testing.T) {
 	assert.Equal(t, rows, uint16(30))
 }
 
+func TestGatherPTYReads(t *testing.T) {
+	saturated := make([][]byte, 70)
+	var saturatedData []byte
+	for i := range saturated {
+		saturated[i] = bytes.Repeat([]byte{byte(i)}, 1024)
+		saturatedData = append(saturatedData, saturated[i]...)
+	}
+
+	tests := []struct {
+		name   string
+		chunks [][]byte
+		want   [][]byte
+	}{
+		{
+			name:   "interactive chunks remain immediate",
+			chunks: [][]byte{[]byte("abc"), []byte("def")},
+			want:   [][]byte{[]byte("abc"), []byte("def")},
+		},
+		{
+			name:   "saturated reads are batched",
+			chunks: saturated,
+			want:   [][]byte{saturatedData[:64*1024], saturatedData[64*1024:]},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reads := make(chan []byte, len(tt.chunks))
+			for _, chunk := range tt.chunks {
+				reads <- chunk
+			}
+			close(reads)
+
+			batches := make(chan []byte, len(tt.chunks))
+			gatherPTYReads(reads, batches, make(chan struct{}))
+
+			var got [][]byte
+			for batch := range batches {
+				got = append(got, batch)
+			}
+			assert.DeepEqual(t, got, tt.want)
+		})
+	}
+}
+
+func TestSessionAcceptsFullPTYBatch(t *testing.T) {
+	s := newSessionLoopHarness(t)
+	s.ptyOut <- bytes.Repeat([]byte("x"), ptyBatchSize)
+
+	_, err := s.attach(t.Context(), sessionAttachSpec{
+		conn:      protocol.NewConn(discardRW{}),
+		closeConn: func() error { return nil },
+		size:      termSize{cols: 80, rows: 24},
+		readOnly:  true,
+	})
+	assert.NilError(t, err)
+}
+
 func TestSessionStopClosesClients(t *testing.T) {
 	s := newSessionLoopHarness(t)
 
@@ -222,69 +314,96 @@ func TestSessionStopClosesClients(t *testing.T) {
 	assert.Equal(t, closeCount.Load(), int32(2))
 }
 
-func TestBroadcastOutputEvictsSlowClients(t *testing.T) {
+func TestQueueOutputBackpressuresSlowClients(t *testing.T) {
 	msg := &protocol.Output{Data: []byte("hello")}
-
-	var fastClosed atomic.Int32
-	fast := &sessionClient{
-		id: "fast",
-		closeConn: func() error {
-			fastClosed.Add(1)
-			return nil
-		},
-		outCh: make(chan protocol.Message, 1),
-	}
-
-	var slowClosed atomic.Int32
-	slow := &sessionClient{
-		id: "slow",
-		closeConn: func() error {
-			slowClosed.Add(1)
-			return nil
-		},
-		outCh: make(chan protocol.Message, 1),
-	}
+	fast := &sessionClient{id: "fast", outCh: make(chan protocol.Message, 1)}
+	slow := &sessionClient{id: "slow", outCh: make(chan protocol.Message, 1)}
 	slow.outCh <- &protocol.Output{Data: []byte("busy")}
 
-	clients := broadcastOutput([]*sessionClient{fast, slow}, "demo", msg)
-	assert.DeepEqual(t, []string{clients[0].id}, []string{"fast"})
-	assert.Equal(t, fastClosed.Load(), int32(0))
-	assert.Equal(t, slowClosed.Load(), int32(1))
+	pending := queueOutput([]*sessionClient{fast, slow}, msg)
+	assert.DeepEqual(t, []string{pending[0].id}, []string{"slow"})
+	assert.DeepEqual(t, <-fast.outCh, msg)
+	assert.DeepEqual(t, <-slow.outCh, &protocol.Output{Data: []byte("busy")})
 
-	got := <-fast.outCh
-	assert.DeepEqual(t, got, msg)
+	pending = queueOutput(pending, msg)
+	assert.DeepEqual(t, pending, []*sessionClient(nil))
+	assert.DeepEqual(t, <-slow.outCh, msg)
 }
 
-func TestBroadcastOutputAllowsTransientBackpressure(t *testing.T) {
-	msg := &protocol.Output{Data: []byte("hello")}
+func TestSessionBackpressurePreservesClientAndOutput(t *testing.T) {
+	s := newSessionLoopHarness(t)
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	client := protocol.NewConn(clientConn)
 
 	var closeCount atomic.Int32
-	slow := &sessionClient{
-		id: "slow",
+	sessionClient, err := s.attach(t.Context(), sessionAttachSpec{
+		conn: protocol.NewConn(serverConn),
 		closeConn: func() error {
 			closeCount.Add(1)
-			return nil
+			return serverConn.Close()
 		},
-		outCh: make(chan protocol.Message, 1),
-	}
-	busy := &protocol.Output{Data: []byte("busy")}
-	slow.outCh <- busy
+		size:     termSize{cols: 80, rows: 24},
+		version:  "slow-client",
+		readOnly: true,
+	})
+	assert.NilError(t, err)
 
-	drainDone := make(chan struct{})
+	msg, err := client.ReadMessage()
+	assert.NilError(t, err)
+	assert.DeepEqual(t, msg, &protocol.Attached{
+		Name:       "demo",
+		PID:        999999999,
+		ClientID:   "1",
+		Cols:       80,
+		Rows:       24,
+		ScreenDump: []byte("\x1b[0m\x1b[1;1H"),
+		Created:    false,
+	})
+
+	outputCount := sessionClientOutBufferSize + 2*cap(s.ptyOut)
+	sent := make(chan struct{})
 	go func() {
-		time.Sleep(slowClientGracePeriod / 4)
-		<-slow.outCh
-		close(drainDone)
+		defer close(sent)
+		for range outputCount {
+			s.ptyOut <- []byte("x")
+		}
 	}()
 
-	clients := broadcastOutput([]*sessionClient{slow}, "demo", msg)
-	<-drainDone
+	select {
+	case <-sent:
+		t.Fatal("PTY producer did not encounter backpressure")
+	case <-time.After(150 * time.Millisecond):
+	}
 
-	assert.DeepEqual(t, []string{clients[0].id}, []string{"slow"})
+	infoCh := make(chan []protocol.SessionClient, 1)
+	go func() { infoCh <- s.clientInfo() }()
+	select {
+	case info := <-infoCh:
+		assert.DeepEqual(t, info, []protocol.SessionClient{{ClientID: "1", ReadOnly: true, Version: "slow-client"}})
+	case <-time.After(5 * time.Second):
+		t.Fatal("session actions blocked behind client output")
+	}
 	assert.Equal(t, closeCount.Load(), int32(0))
 
-	got := <-slow.outCh
-	assert.DeepEqual(t, got, msg)
+	assert.NilError(t, clientConn.SetReadDeadline(time.Now().Add(5*time.Second)))
+	var output []byte
+	for len(output) < outputCount {
+		msg, err := client.ReadMessage()
+		assert.NilError(t, err)
+		if m, ok := msg.(*protocol.Output); ok {
+			output = append(output, m.Data...)
+		}
+	}
+	assert.DeepEqual(t, output, bytes.Repeat([]byte("x"), outputCount))
+	<-sent
+	close(s.ptyOut)
+
+	msg, err = client.ReadMessage()
+	assert.NilError(t, err)
+	assert.DeepEqual(t, msg, &protocol.Exited{ExitCode: 0})
+	<-sessionClient.writeDone
+	assert.Equal(t, closeCount.Load(), int32(0))
 }
 
 func TestNotifyClientsChangedSkipsBlockedClients(t *testing.T) {

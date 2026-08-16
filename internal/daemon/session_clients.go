@@ -6,22 +6,36 @@ import (
 	"log/slog"
 	"math"
 	"syscall"
-	"time"
 
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
 	"github.com/creack/pty"
 )
 
-const (
-	sessionClientOutBufferSize = 256
-	slowClientGracePeriod      = 100 * time.Millisecond
-)
+const sessionClientOutBufferSize = 256
 
 func (c *sessionClient) writeLoop() {
+	defer func() {
+		close(c.writeDone)
+		select {
+		case c.ready <- struct{}{}:
+		default:
+		}
+	}()
+
 	for msg := range c.outCh {
+		select {
+		case c.ready <- struct{}{}:
+		default:
+		}
 		if err := c.conn.WriteMessage(msg); err != nil {
-			break
+			_ = c.closeConn()
+			return
+		}
+	}
+	if c.final != nil {
+		if err := c.conn.WriteMessage(c.final); err != nil {
+			_ = c.closeConn()
 		}
 	}
 }
@@ -169,32 +183,37 @@ func removeClient(clients []*sessionClient, target *sessionClient) []*sessionCli
 	return clients
 }
 
-func broadcastOutput(clients []*sessionClient, name string, msg *protocol.Output) []*sessionClient {
-	i := 0
+func queueOutput(clients []*sessionClient, msg *protocol.Output) []*sessionClient {
+	var pending []*sessionClient
 	for _, c := range clients {
 		select {
-		case c.outCh <- msg:
-			clients[i] = c
-			i++
+		case <-c.writeDone:
 			continue
 		default:
 		}
-
-		timer := time.NewTimer(slowClientGracePeriod)
 		select {
 		case c.outCh <- msg:
-			if !timer.Stop() {
-				<-timer.C
-			}
-			clients[i] = c
-			i++
-		case <-timer.C:
-			slog.Debug("evicting slow client", "session", name, "grace", slowClientGracePeriod)
-			close(c.outCh)
-			_ = c.closeConn()
+		default:
+			pending = append(pending, c)
 		}
 	}
-	return clients[:i]
+	return pending
+}
+
+func pruneFinishedClients(clients, pending []*sessionClient) ([]*sessionClient, []*sessionClient, bool) {
+	kept := clients[:0]
+	changed := false
+	for _, c := range clients {
+		select {
+		case <-c.writeDone:
+			pending = removeClient(pending, c)
+			close(c.outCh)
+			changed = true
+		default:
+			kept = append(kept, c)
+		}
+	}
+	return kept, pending, changed
 }
 
 func notifyClientsChanged(clients []*sessionClient, sizeFn func() (uint16, uint16)) {
