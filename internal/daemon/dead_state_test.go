@@ -69,12 +69,12 @@ func TestDeadSessionNames(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	writeDeadSessionState(t, "dead-one", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("x"),
 	})
 	writeDeadSessionState(t, "dead-two", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("y"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("y"),
 	})
 
 	srv := &Server{
@@ -91,8 +91,8 @@ func TestDeadSessionNames_ExcludesLive(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	writeDeadSessionState(t, "sess", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("x"),
 	})
 
 	srv := &Server{
@@ -120,8 +120,8 @@ func TestPrepareCreateDeadSession_NoForceErrorsWhenStateExists(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	writeDeadSessionState(t, "existing", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("x"),
 	})
 
 	srv := &Server{
@@ -150,8 +150,8 @@ func TestPrepareCreateDeadSession_ForceRemovesState(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", tmp)
 
 	writeDeadSessionState(t, "existing", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("x"),
 	})
 
 	srv := &Server{
@@ -171,8 +171,8 @@ func TestPrepareRestoreDeadSessionReturnsState(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	want := &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("x"),
 	}
 	writeDeadSessionState(t, "dead", want)
 
@@ -190,8 +190,8 @@ func TestPrepareRestoreDeadSessionErrorsWhenRunning(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	writeDeadSessionState(t, "sess", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("x"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("x"),
 	})
 
 	srv := &Server{
@@ -221,8 +221,8 @@ func TestRollbackRestoreDeadSessionRewritesState(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	state := &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 3, CursorCol: 4,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("saved"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("saved"),
 	}
 
 	srv := &Server{
@@ -244,12 +244,12 @@ func TestPruneDeadSessions(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", tmp)
 
 	writeDeadSessionState(t, "dead-a", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("a"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("a"),
 	})
 	writeDeadSessionState(t, "dead-b", &sessionState{
-		Cols: 80, Rows: 24, CursorRow: 0, CursorCol: 0,
-		SavedAt: time.Unix(1700000000, 0), VT: []byte("b"),
+		Cols: 80, Rows: 24,
+		SavedAt: time.Unix(1700000000, 0), Snapshot: []byte("b"),
 	})
 
 	srv := &Server{

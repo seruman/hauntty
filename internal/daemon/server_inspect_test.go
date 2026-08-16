@@ -16,14 +16,7 @@ import (
 
 func TestHandleListIncludesLiveAndDeadSessions(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	writeDeadSessionState(t, "dead", &sessionState{
-		Cols:      100,
-		Rows:      40,
-		SavedAt:   time.Unix(1700000100, 0),
-		CursorRow: 1,
-		CursorCol: 1,
-		VT:        []byte("saved"),
-	})
+	writeDeadSessionState(t, "dead", snapshotSessionState(t, 100, 40, time.Unix(1700000100, 0), []byte("saved")))
 
 	live := newSessionLoopHarness(t)
 	live.Name = "live"
@@ -83,14 +76,7 @@ func TestHandleListIncludesLiveAndDeadSessions(t *testing.T) {
 
 func TestHandleDumpReturnsDeadSession(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	writeDeadSessionState(t, "dead", &sessionState{
-		Cols:      80,
-		Rows:      24,
-		SavedAt:   time.Unix(1700000200, 0),
-		CursorRow: 1,
-		CursorCol: 1,
-		VT:        []byte("hello\nworld\n"),
-	})
+	writeDeadSessionState(t, "dead", snapshotSessionState(t, 80, 24, time.Unix(1700000200, 0), []byte("hello\nworld\n")))
 
 	cfg := config.Default()
 	cfg.Daemon.StatePersistence = true
@@ -111,14 +97,7 @@ func TestHandleDumpReturnsDeadSession(t *testing.T) {
 
 func TestHandleStatusCountsDeadSessionsAndReturnsSession(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	writeDeadSessionState(t, "dead", &sessionState{
-		Cols:      90,
-		Rows:      30,
-		SavedAt:   time.Unix(1700000300, 0),
-		CursorRow: 1,
-		CursorCol: 1,
-		VT:        []byte("saved"),
-	})
+	writeDeadSessionState(t, "dead", snapshotSessionState(t, 90, 30, time.Unix(1700000300, 0), []byte("saved")))
 
 	live := newSessionLoopHarness(t)
 	live.Name = "live"

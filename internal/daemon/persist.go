@@ -12,32 +12,29 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
-
-	"code.selman.me/hauntty/libghostty"
 )
 
 // State file format: [HTST magic 4B][version u8][cols u16][rows u16]
-// [cursor_row u32][cursor_col u32][is_alt_screen u8][saved_at u64]
-// [vt_data_length u32][vt_data...]
+// [saved_at u64][snapshot_length u32][snapshot...]
 var stateMagic = [4]byte{'H', 'T', 'S', 'T'}
 
 const (
-	stateVersion    = 1
-	maxStateVTBytes = 16 << 20
+	// Bump this with any change to the pinned Ghostty snapshot format.
+	stateVersion          = 2
+	maxStateSnapshotBytes = 128 << 20
 )
 
 type sessionState struct {
-	Cols        uint16
-	Rows        uint16
-	CursorRow   uint32
-	CursorCol   uint32
-	IsAltScreen bool
-	SavedAt     time.Time
-	VT          []byte
+	Cols     uint16
+	Rows     uint16
+	SavedAt  time.Time
+	Snapshot []byte
 }
 
 type persister struct {
+	mu       sync.Mutex
 	sessions func() map[string]*Session
 	dir      string
 	interval time.Duration
@@ -102,22 +99,21 @@ func (p *persister) saveAllWith(save func(name string, s *Session) error) error 
 }
 
 func (p *persister) saveSession(name string, s *Session) error {
-	dump, err := s.dumpScreen(p.ctx, libghostty.DumpVTFull)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	snapshot, err := s.snapshot(p.ctx)
 	if err != nil {
-		return fmt.Errorf("persist: dump screen: %w", err)
+		return fmt.Errorf("persist: snapshot terminal: %w", err)
 	}
 
 	cols, rows := s.size()
 	state := &sessionState{
-		Cols:        cols,
-		Rows:        rows,
-		CursorRow:   dump.CursorRow,
-		CursorCol:   dump.CursorCol,
-		IsAltScreen: dump.IsAltScreen,
-		SavedAt:     time.Now(),
-		VT:          dump.Data,
+		Cols:     cols,
+		Rows:     rows,
+		SavedAt:  time.Now(),
+		Snapshot: snapshot,
 	}
-
 	return writeStateInDir(p.dir, name, state)
 }
 
@@ -148,6 +144,13 @@ func writeStateInDir(dir string, name string, state *sessionState) error {
 }
 
 func encodeState(s *sessionState) ([]byte, error) {
+	if len(s.Snapshot) == 0 {
+		return nil, fmt.Errorf("persist: snapshot is empty")
+	}
+	if len(s.Snapshot) > maxStateSnapshotBytes {
+		return nil, fmt.Errorf("persist: snapshot too large: %d bytes", len(s.Snapshot))
+	}
+
 	var buf bytes.Buffer
 
 	buf.Write(stateMagic[:])
@@ -158,24 +161,13 @@ func encodeState(s *sessionState) ([]byte, error) {
 	if err := binary.Write(&buf, binary.BigEndian, s.Rows); err != nil {
 		return nil, err
 	}
-	if err := binary.Write(&buf, binary.BigEndian, s.CursorRow); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(&buf, binary.BigEndian, s.CursorCol); err != nil {
-		return nil, err
-	}
-	if s.IsAltScreen {
-		buf.WriteByte(1)
-	} else {
-		buf.WriteByte(0)
-	}
 	if err := binary.Write(&buf, binary.BigEndian, uint64(s.SavedAt.Unix())); err != nil {
 		return nil, err
 	}
-	if err := binary.Write(&buf, binary.BigEndian, uint32(len(s.VT))); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, uint32(len(s.Snapshot))); err != nil {
 		return nil, err
 	}
-	buf.Write(s.VT)
+	buf.Write(s.Snapshot)
 	return buf.Bytes(), nil
 }
 
@@ -214,42 +206,30 @@ func decodeState(data []byte) (*sessionState, error) {
 	if err := binary.Read(dec, binary.BigEndian, &rows); err != nil {
 		return nil, fmt.Errorf("persist: read rows: %w", err)
 	}
-	var cursorRow uint32
-	if err := binary.Read(dec, binary.BigEndian, &cursorRow); err != nil {
-		return nil, fmt.Errorf("persist: read cursor_row: %w", err)
-	}
-	var cursorCol uint32
-	if err := binary.Read(dec, binary.BigEndian, &cursorCol); err != nil {
-		return nil, fmt.Errorf("persist: read cursor_col: %w", err)
-	}
-	isAltByte, err := dec.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("persist: read is_alt_screen: %w", err)
-	}
 	var savedAtUnix uint64
 	if err := binary.Read(dec, binary.BigEndian, &savedAtUnix); err != nil {
 		return nil, fmt.Errorf("persist: read saved_at: %w", err)
 	}
-	var vtLen uint32
-	if err := binary.Read(dec, binary.BigEndian, &vtLen); err != nil {
-		return nil, fmt.Errorf("persist: read vt_data: %w", err)
+	var snapshotLen uint32
+	if err := binary.Read(dec, binary.BigEndian, &snapshotLen); err != nil {
+		return nil, fmt.Errorf("persist: read snapshot: %w", err)
 	}
-	if vtLen > maxStateVTBytes {
-		return nil, fmt.Errorf("persist: vt_data too large: %d bytes", vtLen)
+	if snapshotLen == 0 {
+		return nil, fmt.Errorf("persist: snapshot is empty")
 	}
-	vt := make([]byte, vtLen)
-	if _, err := io.ReadFull(dec, vt); err != nil {
-		return nil, fmt.Errorf("persist: read vt_data: %w", err)
+	if snapshotLen > maxStateSnapshotBytes {
+		return nil, fmt.Errorf("persist: snapshot too large: %d bytes", snapshotLen)
+	}
+	snapshot := make([]byte, snapshotLen)
+	if _, err := io.ReadFull(dec, snapshot); err != nil {
+		return nil, fmt.Errorf("persist: read snapshot: %w", err)
 	}
 
 	return &sessionState{
-		Cols:        cols,
-		Rows:        rows,
-		CursorRow:   cursorRow,
-		CursorCol:   cursorCol,
-		IsAltScreen: isAltByte != 0,
-		SavedAt:     time.Unix(int64(savedAtUnix), 0),
-		VT:          vt,
+		Cols:     cols,
+		Rows:     rows,
+		SavedAt:  time.Unix(int64(savedAtUnix), 0),
+		Snapshot: snapshot,
 	}, nil
 }
 

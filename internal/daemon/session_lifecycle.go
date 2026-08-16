@@ -179,6 +179,7 @@ func (s *Session) run() {
 		select {
 		case data, ok := <-ptyCh:
 			if !ok {
+				waitFeedApplied(lastFeedApplied)
 				close(s.feedCh)
 				exitMsg := &protocol.Exited{ExitCode: s.exitCode}
 				for _, c := range clients {
@@ -367,6 +368,10 @@ func (s *Session) sendInput(data []byte) error {
 
 func (s *Session) dumpScreen(ctx context.Context, format libghostty.DumpFormat) (*libghostty.ScreenDump, error) {
 	return s.term.dumpScreen(format)
+}
+
+func (s *Session) snapshot(ctx context.Context) ([]byte, error) {
+	return s.term.snapshot()
 }
 
 func exitCodeFromWaitStatus(ws syscall.WaitStatus) int32 {

@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bytes"
 	"fmt"
 
 	"code.selman.me/hauntty/internal/protocol"
@@ -21,10 +20,11 @@ func newTerminalState(rt *libghostty.Runtime, cols, rows, scrollback uint32) (*t
 }
 
 func restoreTerminalState(rt *libghostty.Runtime, state *sessionState, size termSize, scrollback uint32) (*terminalState, error) {
-	term, err := newTerminalState(rt, uint32(state.Cols), uint32(state.Rows), scrollback)
+	restored, err := rt.RestoreTerminal(state.Snapshot, scrollback)
 	if err != nil {
 		return nil, err
 	}
+	term := &terminalState{term: restored}
 
 	cleanup := true
 	defer func() {
@@ -33,12 +33,21 @@ func restoreTerminalState(rt *libghostty.Runtime, state *sessionState, size term
 		}
 	}()
 
-	if len(state.VT) > 0 {
-		if err := term.feed(state.VT); err != nil {
+	ground, err := term.vtGround()
+	if err != nil {
+		return nil, err
+	}
+	if !ground {
+		// Cancel any unfinished sequence before injecting restore controls.
+		if err := term.feed([]byte("\x18")); err != nil {
 			return nil, err
 		}
 	}
-	if state.IsAltScreen {
+	dump, err := term.dumpScreen(libghostty.DumpPlain)
+	if err != nil {
+		return nil, err
+	}
+	if dump.IsAltScreen {
 		if err := term.feed([]byte("\x1b[?1049l")); err != nil {
 			return nil, err
 		}
@@ -46,10 +55,8 @@ func restoreTerminalState(rt *libghostty.Runtime, state *sessionState, size term
 	if err := term.feed([]byte("\x1b[!p")); err != nil {
 		return nil, err
 	}
-	if state.Cols != size.cols || state.Rows != size.rows {
-		if err := term.resize(uint32(size.cols), uint32(size.rows)); err != nil {
-			return nil, fmt.Errorf("resize restored terminal state: %w", err)
-		}
+	if err := term.resize(uint32(size.cols), uint32(size.rows)); err != nil {
+		return nil, fmt.Errorf("resize restored terminal state: %w", err)
 	}
 
 	cleanup = false
@@ -68,6 +75,10 @@ func (t *terminalState) dumpScreen(format libghostty.DumpFormat) (*libghostty.Sc
 	return t.term.DumpScreen(format)
 }
 
+func (t *terminalState) snapshot() ([]byte, error) {
+	return t.term.Snapshot()
+}
+
 func (t *terminalState) encodeClientKey(keyCode protocol.KeyCode, mods protocol.KeyMods) ([]byte, error) {
 	return t.term.EncodeKey(libghostty.KeyCode(keyCode), libghostty.Modifier(mods))
 }
@@ -76,24 +87,21 @@ func (t *terminalState) cwd() (string, bool, error) {
 	return t.term.GetCwd()
 }
 
+func (t *terminalState) vtGround() (bool, error) {
+	return t.term.VTGround()
+}
+
 func (t *terminalState) close() error {
 	return t.term.Close()
 }
 
 func dumpDeadTerminalState(rt *libghostty.Runtime, state *sessionState, scrollback uint32, format protocol.DumpFormat) ([]byte, error) {
-	scrollback = max(scrollback, uint32(bytes.Count(state.VT, []byte{'\n'}))+uint32(state.Rows)+1)
-
-	term, err := newTerminalState(rt, uint32(state.Cols), uint32(state.Rows), scrollback)
+	restored, err := rt.RestoreTerminal(state.Snapshot, scrollback)
 	if err != nil {
-		return nil, fmt.Errorf("dump dead terminal state: new terminal: %w", err)
+		return nil, fmt.Errorf("dump dead terminal state: restore terminal: %w", err)
 	}
+	term := &terminalState{term: restored}
 	defer term.close()
-
-	if len(state.VT) > 0 {
-		if err := term.feed(state.VT); err != nil {
-			return nil, fmt.Errorf("dump dead terminal state: feed vt: %w", err)
-		}
-	}
 
 	dump, err := term.dumpScreen(terminalDumpFormat(format))
 	if err != nil {
