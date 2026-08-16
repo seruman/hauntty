@@ -19,11 +19,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
-
       - name: Setup just
         uses: extractions/setup-just@v2
 
@@ -44,11 +39,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
 
       - name: Setup just
         uses: extractions/setup-just@v2

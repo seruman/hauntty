@@ -1,6 +1,7 @@
 package libghostty_test
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -33,6 +34,141 @@ func TestBasicFeedAndDump(t *testing.T) {
 	assert.DeepEqual(t, dump.Data, []byte("Hello, World!\x1b[0m\x1b[2;1H"))
 }
 
+func TestSnapshotRestore(t *testing.T) {
+	rt, err := libghostty.NewRuntime()
+	assert.NilError(t, err)
+	defer rt.Close()
+
+	term := newTerminal(t, rt, 8, 2, 1000)
+	defer term.Close()
+
+	err = term.Feed([]byte("one\r\ntwo\r\nthree"))
+	assert.NilError(t, err)
+	snapshot, err := term.Snapshot()
+	assert.NilError(t, err)
+
+	restored, err := rt.RestoreTerminal(snapshot, 1000)
+	assert.NilError(t, err)
+	defer restored.Close()
+
+	dump, err := restored.DumpScreen(libghostty.DumpPlain | libghostty.DumpFlagScrollback)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+		Data:        []byte("one\ntwo\nthree"),
+		CursorRow:   1,
+		CursorCol:   5,
+		IsAltScreen: false,
+	})
+}
+
+func TestSnapshotRestoreAlternateScreen(t *testing.T) {
+	rt, err := libghostty.NewRuntime()
+	assert.NilError(t, err)
+	defer rt.Close()
+
+	term := newTerminal(t, rt, 80, 24, 1000)
+	defer term.Close()
+
+	err = term.Feed([]byte("primary\x1b[?1049halt"))
+	assert.NilError(t, err)
+	snapshot, err := term.Snapshot()
+	assert.NilError(t, err)
+
+	restored, err := rt.RestoreTerminal(snapshot, 1000)
+	assert.NilError(t, err)
+	defer restored.Close()
+
+	dump, err := restored.DumpScreen(libghostty.DumpPlain)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+		Data:        []byte("       alt"),
+		CursorRow:   0,
+		CursorCol:   10,
+		IsAltScreen: true,
+	})
+}
+
+func TestVTGround(t *testing.T) {
+	rt, err := libghostty.NewRuntime()
+	assert.NilError(t, err)
+	defer rt.Close()
+
+	term := newTerminal(t, rt, 80, 24, 1000)
+	defer term.Close()
+
+	ground, err := term.VTGround()
+	assert.NilError(t, err)
+	assert.Equal(t, ground, true)
+	assert.NilError(t, term.Feed([]byte("\x1b[31")))
+	ground, err = term.VTGround()
+	assert.NilError(t, err)
+	assert.Equal(t, ground, false)
+	assert.NilError(t, term.Feed([]byte("m")))
+	ground, err = term.VTGround()
+	assert.NilError(t, err)
+	assert.Equal(t, ground, true)
+}
+
+func TestSnapshotRestoreContinuation(t *testing.T) {
+	rt, err := libghostty.NewRuntime()
+	assert.NilError(t, err)
+	defer rt.Close()
+
+	term := newTerminal(t, rt, 80, 24, 1000)
+	defer term.Close()
+
+	err = term.Feed([]byte("\x1b[31"))
+	assert.NilError(t, err)
+	snapshot, err := term.Snapshot()
+	assert.NilError(t, err)
+
+	restored, err := rt.RestoreTerminal(snapshot, 1000)
+	assert.NilError(t, err)
+	defer restored.Close()
+
+	err = restored.Feed([]byte("mred"))
+	assert.NilError(t, err)
+	dump, err := restored.DumpScreen(libghostty.DumpVTSafe)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+		Data:        []byte("\x1b[0m\x1b[38;5;1mred\x1b[0m\x1b[0m"),
+		CursorRow:   0,
+		CursorCol:   3,
+		IsAltScreen: false,
+	})
+}
+
+func TestRestoreInvalidSnapshot(t *testing.T) {
+	rt, err := libghostty.NewRuntime()
+	assert.NilError(t, err)
+	defer rt.Close()
+
+	_, err = rt.RestoreTerminal([]byte("invalid"), 1000)
+	assert.Error(t, err, "wasm: ghostty_snapshot_decoder_decode returned -2")
+}
+
+func TestLargeFeedAndDump(t *testing.T) {
+	rt, err := libghostty.NewRuntime()
+	assert.NilError(t, err)
+	defer rt.Close()
+
+	term := newTerminal(t, rt, 80, 24, 2000)
+	defer term.Close()
+
+	data := bytes.Repeat([]byte("a"), 70*1024)
+	err = term.Feed(data)
+	assert.NilError(t, err)
+
+	dump, err := term.DumpScreen(libghostty.DumpPlain | libghostty.DumpFlagUnwrap | libghostty.DumpFlagScrollback)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+		Data:        data,
+		CursorRow:   23,
+		CursorCol:   79,
+		IsAltScreen: false,
+	})
+}
+
 func TestResize(t *testing.T) {
 	rt, err := libghostty.NewRuntime()
 	assert.NilError(t, err)
@@ -44,12 +180,18 @@ func TestResize(t *testing.T) {
 	err = term.Resize(120, 40)
 	assert.NilError(t, err)
 
-	err = term.Feed([]byte("after resize"))
+	data := bytes.Repeat([]byte("a"), 100)
+	err = term.Feed(data)
 	assert.NilError(t, err)
 
-	dump, err := term.DumpScreen(libghostty.DumpVTFull)
+	dump, err := term.DumpScreen(libghostty.DumpPlain)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, dump.Data, []byte("after resize\x1b[0m\x1b[1;13H"))
+	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+		Data:        data,
+		CursorRow:   0,
+		CursorCol:   100,
+		IsAltScreen: false,
+	})
 }
 
 func TestCursorPosition(t *testing.T) {
@@ -168,6 +310,27 @@ func TestDumpScrollback(t *testing.T) {
 		dump, err := term.DumpScreen(libghostty.DumpPlain | libghostty.DumpFlagScrollback)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, dump.Data, []byte("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"))
+	})
+}
+
+func TestDumpVTSafe(t *testing.T) {
+	rt, err := libghostty.NewRuntime()
+	assert.NilError(t, err)
+	defer rt.Close()
+
+	term := newTerminal(t, rt, 80, 24, 1000)
+	defer term.Close()
+
+	err = term.Feed([]byte("\x1b[31mred"))
+	assert.NilError(t, err)
+
+	dump, err := term.DumpScreen(libghostty.DumpVTSafe)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+		Data:        []byte("\x1b[0m\x1b[38;5;1mred\x1b[0m\x1b[0m"),
+		CursorRow:   0,
+		CursorCol:   3,
+		IsAltScreen: false,
 	})
 }
 

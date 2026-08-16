@@ -1,8 +1,6 @@
 x/
-vt/zig-out/
-vt/.zig-cache/
 .overseer/
 huti.asc
 /ht
 /.pi/
-/libghostty/hauntty-vt.wasm
+/libghostty/ghostty-vt-small.wasm
