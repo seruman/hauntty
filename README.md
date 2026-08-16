@@ -55,13 +55,15 @@ or removed with `ht prune`.
 ## Install
 
 ```
-go install code.selman.me/hauntty/cmd/ht@latest
+GOEXPERIMENT=simd go install code.selman.me/hauntty/cmd/ht@latest
 ```
 
 ## Building
 
+Building requires Go 1.27 with the SIMD experiment enabled.
+
 ```
-go build -o ht ./cmd/ht
+GOEXPERIMENT=simd go build -o ht ./cmd/ht
 ```
 
 ## Config

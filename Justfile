@@ -1,3 +1,5 @@
+export GOEXPERIMENT := "simd"
+
 generate:
 	go generate ./...
 
