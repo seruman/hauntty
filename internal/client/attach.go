@@ -28,7 +28,7 @@ func isConnClosed(err error) bool {
 }
 
 func findDetach(data []byte, dk DetachKey) int {
-	if dk.rawByte != 0 {
+	if dk.hasRaw {
 		if i := bytes.IndexByte(data, dk.rawByte); i >= 0 {
 			return i
 		}

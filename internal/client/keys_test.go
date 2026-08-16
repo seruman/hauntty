@@ -66,19 +66,23 @@ func TestParseDetachKey(t *testing.T) {
 		name    string
 		input   string
 		rawByte byte
+		hasRaw  bool
 		csiSeq  []byte
 	}{
-		{`ctrl+]`, `ctrl+]`, 0x1d, []byte("\x1b[93;5u")},
-		{`ctrl+\`, `ctrl+\`, 0x1c, []byte("\x1b[92;5u")},
-		{`ctrl+a`, `ctrl+a`, 0x01, []byte("\x1b[97;5u")},
-		{`ctrl+c`, `ctrl+c`, 0x03, []byte("\x1b[99;5u")},
-		{`ctrl+shift+z`, `ctrl+shift+z`, 0x1a, []byte("\x1b[122;6u")},
+		{`ctrl+]`, `ctrl+]`, 0x1d, true, []byte("\x1b[93;5u")},
+		{`ctrl+\`, `ctrl+\`, 0x1c, true, []byte("\x1b[92;5u")},
+		{`ctrl+a`, `ctrl+a`, 0x01, true, []byte("\x1b[97;5u")},
+		{`ctrl+c`, `ctrl+c`, 0x03, true, []byte("\x1b[99;5u")},
+		{`ctrl+shift+z`, `ctrl+shift+z`, 0x1a, true, []byte("\x1b[122;6u")},
+		{`ctrl+space`, `ctrl+space`, 0x00, true, []byte("\x1b[32;5u")},
+		{`ctrl+[`, `ctrl+[`, 0x00, false, []byte("\x1b[91;5u")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dk, err := ParseDetachKey(tt.input)
 			assert.NilError(t, err)
 			assert.Equal(t, dk.rawByte, tt.rawByte)
+			assert.Equal(t, dk.hasRaw, tt.hasRaw)
 			assert.DeepEqual(t, dk.csiSeq, tt.csiSeq)
 		})
 	}

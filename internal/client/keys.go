@@ -153,6 +153,7 @@ func parseKeyName(name string) (KeyCode, error) {
 
 type DetachKey struct {
 	rawByte byte
+	hasRaw  bool
 	csiSeq  []byte
 }
 
@@ -167,25 +168,33 @@ func ParseDetachKey(notation string) (DetachKey, error) {
 	if ki.Code < 0x20 || ki.Code > 0x7e {
 		return DetachKey{}, fmt.Errorf("detach keybind must be ctrl+<printable key>")
 	}
-	kittyMods := uint32(1)
-	if ki.Mods&ModShift != 0 {
-		kittyMods += 1
+	rt, err := libghostty.NewRuntime()
+	if err != nil {
+		return DetachKey{}, fmt.Errorf("encode detach key: %w", err)
 	}
-	if ki.Mods&ModCtrl != 0 {
-		kittyMods += 4
+	defer rt.Close()
+	term, err := rt.NewTerminal(1, 1, 0)
+	if err != nil {
+		return DetachKey{}, fmt.Errorf("encode detach key: %w", err)
 	}
-	if ki.Mods&ModAlt != 0 {
-		kittyMods += 2
+	defer term.Close()
+
+	legacy, err := term.EncodeKey(libghostty.KeyCode(ki.Code), libghostty.Modifier(ki.Mods&ModCtrl))
+	if err != nil {
+		return DetachKey{}, fmt.Errorf("encode legacy detach key: %w", err)
 	}
-	if ki.Mods&ModSuper != 0 {
-		kittyMods += 8
+	var raw byte
+	hasRaw := len(legacy) == 1 && legacy[0] != 0x1b
+	if hasRaw {
+		raw = legacy[0]
 	}
-	raw := byte(uint32(ki.Code) & 0x1f)
-	if raw == 0x1b {
-		raw = 0
+
+	if err := term.Feed([]byte("\x1b[>1u")); err != nil {
+		return DetachKey{}, fmt.Errorf("enable kitty keyboard protocol: %w", err)
 	}
-	return DetachKey{
-		rawByte: raw,
-		csiSeq:  fmt.Appendf(nil, "\x1b[%d;%du", ki.Code, kittyMods),
-	}, nil
+	kitty, err := term.EncodeKey(libghostty.KeyCode(ki.Code), libghostty.Modifier(ki.Mods))
+	if err != nil {
+		return DetachKey{}, fmt.Errorf("encode kitty detach key: %w", err)
+	}
+	return DetachKey{rawByte: raw, hasRaw: hasRaw, csiSeq: kitty}, nil
 }
