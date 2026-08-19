@@ -11,41 +11,41 @@ import (
 type KeyCode = protocol.KeyCode
 
 const (
-	KeyEnter     KeyCode = KeyCode(libghostty.KeyEnter)
-	KeyEscape    KeyCode = KeyCode(libghostty.KeyEscape)
-	KeyTab       KeyCode = KeyCode(libghostty.KeyTab)
-	KeyBackspace KeyCode = KeyCode(libghostty.KeyBackspace)
-	KeyUp        KeyCode = KeyCode(libghostty.KeyUp)
-	KeyDown      KeyCode = KeyCode(libghostty.KeyDown)
-	KeyLeft      KeyCode = KeyCode(libghostty.KeyLeft)
-	KeyRight     KeyCode = KeyCode(libghostty.KeyRight)
-	KeyHome      KeyCode = KeyCode(libghostty.KeyHome)
-	KeyEnd       KeyCode = KeyCode(libghostty.KeyEnd)
-	KeyPageUp    KeyCode = KeyCode(libghostty.KeyPageUp)
-	KeyPageDown  KeyCode = KeyCode(libghostty.KeyPageDown)
-	KeyInsert    KeyCode = KeyCode(libghostty.KeyInsert)
-	KeyDelete    KeyCode = KeyCode(libghostty.KeyDelete)
-	KeyF1        KeyCode = KeyCode(libghostty.KeyF1)
-	KeyF2        KeyCode = KeyCode(libghostty.KeyF2)
-	KeyF3        KeyCode = KeyCode(libghostty.KeyF3)
-	KeyF4        KeyCode = KeyCode(libghostty.KeyF4)
-	KeyF5        KeyCode = KeyCode(libghostty.KeyF5)
-	KeyF6        KeyCode = KeyCode(libghostty.KeyF6)
-	KeyF7        KeyCode = KeyCode(libghostty.KeyF7)
-	KeyF8        KeyCode = KeyCode(libghostty.KeyF8)
-	KeyF9        KeyCode = KeyCode(libghostty.KeyF9)
-	KeyF10       KeyCode = KeyCode(libghostty.KeyF10)
-	KeyF11       KeyCode = KeyCode(libghostty.KeyF11)
-	KeyF12       KeyCode = KeyCode(libghostty.KeyF12)
+	KeyEnter     KeyCode = 0x100
+	KeyEscape    KeyCode = 0x101
+	KeyTab       KeyCode = 0x102
+	KeyBackspace KeyCode = 0x103
+	KeyUp        KeyCode = 0x110
+	KeyDown      KeyCode = 0x111
+	KeyLeft      KeyCode = 0x112
+	KeyRight     KeyCode = 0x113
+	KeyHome      KeyCode = 0x120
+	KeyEnd       KeyCode = 0x121
+	KeyPageUp    KeyCode = 0x122
+	KeyPageDown  KeyCode = 0x123
+	KeyInsert    KeyCode = 0x124
+	KeyDelete    KeyCode = 0x125
+	KeyF1        KeyCode = 0x130
+	KeyF2        KeyCode = 0x131
+	KeyF3        KeyCode = 0x132
+	KeyF4        KeyCode = 0x133
+	KeyF5        KeyCode = 0x134
+	KeyF6        KeyCode = 0x135
+	KeyF7        KeyCode = 0x136
+	KeyF8        KeyCode = 0x137
+	KeyF9        KeyCode = 0x138
+	KeyF10       KeyCode = 0x139
+	KeyF11       KeyCode = 0x13a
+	KeyF12       KeyCode = 0x13b
 )
 
 type Modifier = protocol.KeyMods
 
 const (
-	ModShift Modifier = Modifier(libghostty.ModShift)
-	ModCtrl  Modifier = Modifier(libghostty.ModCtrl)
-	ModAlt   Modifier = Modifier(libghostty.ModAlt)
-	ModSuper Modifier = Modifier(libghostty.ModSuper)
+	ModShift Modifier = 0x01
+	ModCtrl  Modifier = 0x02
+	ModAlt   Modifier = 0x04
+	ModSuper Modifier = 0x08
 )
 
 type KeyInput struct {
@@ -168,18 +168,23 @@ func ParseDetachKey(notation string) (DetachKey, error) {
 	if ki.Code < 0x20 || ki.Code > 0x7e {
 		return DetachKey{}, fmt.Errorf("detach keybind must be ctrl+<printable key>")
 	}
-	rt, err := libghostty.NewRuntime()
-	if err != nil {
-		return DetachKey{}, fmt.Errorf("encode detach key: %w", err)
-	}
-	defer rt.Close()
-	term, err := rt.NewTerminal(1, 1, 0)
+	term, err := libghostty.NewTerminal(libghostty.WithSize(1, 1))
 	if err != nil {
 		return DetachKey{}, fmt.Errorf("encode detach key: %w", err)
 	}
 	defer term.Close()
+	encoder, err := libghostty.NewKeyEncoder()
+	if err != nil {
+		return DetachKey{}, fmt.Errorf("encode detach key: %w", err)
+	}
+	defer encoder.Close()
+	event, err := libghostty.NewKeyEvent()
+	if err != nil {
+		return DetachKey{}, fmt.Errorf("encode detach key: %w", err)
+	}
+	defer event.Close()
 
-	legacy, err := term.EncodeKey(libghostty.KeyCode(ki.Code), libghostty.Modifier(ki.Mods&ModCtrl))
+	legacy, err := encodeDetachKey(encoder, event, term, ki.Code, ki.Mods&ModCtrl)
 	if err != nil {
 		return DetachKey{}, fmt.Errorf("encode legacy detach key: %w", err)
 	}
@@ -189,12 +194,107 @@ func ParseDetachKey(notation string) (DetachKey, error) {
 		raw = legacy[0]
 	}
 
-	if err := term.Feed([]byte("\x1b[>1u")); err != nil {
-		return DetachKey{}, fmt.Errorf("enable kitty keyboard protocol: %w", err)
-	}
-	kitty, err := term.EncodeKey(libghostty.KeyCode(ki.Code), libghostty.Modifier(ki.Mods))
+	term.VTWrite([]byte("\x1b[>1u"))
+	kitty, err := encodeDetachKey(encoder, event, term, ki.Code, ki.Mods)
 	if err != nil {
 		return DetachKey{}, fmt.Errorf("encode kitty detach key: %w", err)
 	}
 	return DetachKey{rawByte: raw, hasRaw: hasRaw, csiSeq: kitty}, nil
+}
+
+func encodeDetachKey(encoder *libghostty.KeyEncoder, event *libghostty.KeyEvent, term *libghostty.Terminal, code KeyCode, mods Modifier) ([]byte, error) {
+	key, ok := detachPhysicalKey(byte(code))
+	if !ok {
+		return nil, fmt.Errorf("unsupported key code %d", code)
+	}
+	event.SetAction(libghostty.KeyActionPress)
+	event.SetKey(key)
+	event.SetMods(libghostty.Mods(mods))
+	consumed := libghostty.Mods(0)
+	text := ""
+	if mods&ModShift != 0 {
+		if shifted, ok := shiftedKeyByte(byte(code)); ok {
+			consumed = libghostty.ModShift
+			text = string(shifted)
+		} else if mods&ModCtrl == 0 {
+			text = string(rune(code))
+		}
+	} else if mods&ModCtrl == 0 {
+		text = string(rune(code))
+	}
+	event.SetConsumedMods(consumed)
+	event.SetComposing(false)
+	event.SetUnshiftedCodepoint(rune(code))
+	event.SetUTF8(text)
+	encoder.SetOptFromTerminal(term)
+	return encoder.Encode(event)
+}
+
+func shiftedKeyByte(ch byte) (byte, bool) {
+	if ch >= 'a' && ch <= 'z' {
+		return ch - ('a' - 'A'), true
+	}
+	const unshifted = "`1234567890-=[]\\;',./"
+	const shifted = "~!@#$%^&*()_+{}|:\"<>?"
+	if index := strings.IndexByte(unshifted, ch); index >= 0 {
+		return shifted[index], true
+	}
+	return 0, false
+}
+
+func detachPhysicalKey(ch byte) (libghostty.Key, bool) {
+	if ch >= 'a' && ch <= 'z' {
+		return libghostty.KeyA + libghostty.Key(ch-'a'), true
+	}
+	if ch >= '0' && ch <= '9' {
+		return libghostty.KeyDigit0 + libghostty.Key(ch-'0'), true
+	}
+	switch ch {
+	case ')':
+		return libghostty.KeyDigit0, true
+	case '!':
+		return libghostty.KeyDigit1, true
+	case '@':
+		return libghostty.KeyDigit2, true
+	case '#':
+		return libghostty.KeyDigit3, true
+	case '$':
+		return libghostty.KeyDigit4, true
+	case '%':
+		return libghostty.KeyDigit5, true
+	case '^':
+		return libghostty.KeyDigit6, true
+	case '&':
+		return libghostty.KeyDigit7, true
+	case '*':
+		return libghostty.KeyDigit8, true
+	case '(':
+		return libghostty.KeyDigit9, true
+	case '`', '~':
+		return libghostty.KeyBackquote, true
+	case '\\', '|':
+		return libghostty.KeyBackslash, true
+	case '[', '{':
+		return libghostty.KeyBracketLeft, true
+	case ']', '}':
+		return libghostty.KeyBracketRight, true
+	case ',', '<':
+		return libghostty.KeyComma, true
+	case '=', '+':
+		return libghostty.KeyEqual, true
+	case '-', '_':
+		return libghostty.KeyMinus, true
+	case '.', '>':
+		return libghostty.KeyPeriod, true
+	case '\'', '"':
+		return libghostty.KeyQuote, true
+	case ';', ':':
+		return libghostty.KeySemicolon, true
+	case '/', '?':
+		return libghostty.KeySlash, true
+	case ' ':
+		return libghostty.KeySpace, true
+	default:
+		return 0, false
+	}
 }

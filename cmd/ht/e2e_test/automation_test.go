@@ -25,7 +25,7 @@ func TestSendTextAndKey(t *testing.T) {
 	sh.Type("$HT_BIN attach send-session\n")
 	sh.WaitFor("created session")
 	e.waitAttachedPrompt(sh)
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 
 	sendText := e.run("send", "send-session", "echo send-ok")
@@ -55,7 +55,7 @@ func TestWaitSessionOutput(t *testing.T) {
 	e.waitAttachedPrompt(sh)
 	sh.Type("echo ready-for-wait\n")
 	sh.WaitFor("ready-for-wait")
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 
 	success := e.run("wait", "wait-session", "ready-for-wait", "-t", "5000")
@@ -80,7 +80,7 @@ func TestWaitRegex(t *testing.T) {
 	e.waitAttachedPrompt(sh)
 	sh.Type("echo value-42\n")
 	sh.WaitFor("value-42")
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 
 	ok := e.run("wait", "regex-session", "value-[0-9]+", "-e", "-t", "5000")
@@ -110,7 +110,7 @@ func TestDumpPlain(t *testing.T) {
 	sh.WaitFor("alpha")
 	sh.WaitFor("beta")
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 
@@ -135,7 +135,7 @@ func TestDumpFormats(t *testing.T) {
 	sh.Type("printf 'fmt-line-1\\nfmt-line-2\\n'\n")
 	sh.WaitFor("fmt-line-1")
 	sh.WaitFor("fmt-line-2")
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 
 	vt := e.run("dump", "dump-formats", "--format", "vt")
@@ -161,7 +161,7 @@ func TestDumpDeadSessionPreservesFormats(t *testing.T) {
 	sh.WaitFor("red")
 	sh.WaitFor("plain")
 	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	e.waitHostPrompt(sh)
 
 	kill := e.run("kill", "dead-dump-formats")
@@ -193,7 +193,7 @@ func TestDumpDeadSessionPreservesJoinFlag(t *testing.T) {
 	sh.Type("$HT_BIN attach dead-dump-join -- /bin/sh -c \"printf 'aaaaaaaaaaaaaaaaaaaabbbbbbbbbb\\n'; sleep 30\"\n")
 	sh.WaitFor("bbbb")
 	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	e.waitHostPrompt(sh)
 
 	kill := e.run("kill", "dead-dump-join")

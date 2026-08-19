@@ -19,7 +19,6 @@ import (
 	hauntty "code.selman.me/hauntty"
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
-	"code.selman.me/hauntty/libghostty"
 	"golang.org/x/sys/unix"
 )
 
@@ -29,7 +28,6 @@ type Server struct {
 	lockPath          string
 	sessions          map[string]*Session
 	mu                sync.RWMutex
-	wasmRT            *libghostty.Runtime
 	ctx               context.Context
 	cancel            context.CancelFunc
 	listener          net.Listener
@@ -47,11 +45,6 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy config.Resi
 		return nil, fmt.Errorf("daemon: state_persistence_interval must be > 0 when state persistence is enabled")
 	}
 
-	rt, err := libghostty.NewRuntime()
-	if err != nil {
-		return nil, fmt.Errorf("daemon: init wasm runtime: %w", err)
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	sock := cmp.Or(cfg.SocketPath, config.SocketPath())
 	s := &Server{
@@ -59,7 +52,6 @@ func New(ctx context.Context, cfg *config.DaemonConfig, resizePolicy config.Resi
 		pidPath:           filepath.Join(filepath.Dir(sock), "hauntty.pid"),
 		lockPath:          filepath.Join(filepath.Dir(sock), "hauntty.lock"),
 		sessions:          make(map[string]*Session),
-		wasmRT:            rt,
 		ctx:               ctx,
 		cancel:            cancel,
 		defaultScrollback: cfg.DefaultScrollback,
@@ -315,8 +307,6 @@ func (s *Server) shutdown() {
 	}
 	s.sessions = make(map[string]*Session)
 	s.mu.Unlock()
-
-	s.wasmRT.Close()
 
 	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("remove socket", "path", s.socketPath, "err", err)

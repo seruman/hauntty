@@ -15,13 +15,14 @@ import (
 func snapshotSessionState(t *testing.T, cols, rows uint16, savedAt time.Time, input []byte) *sessionState {
 	t.Helper()
 
-	rt, err := libghostty.NewRuntime()
-	assert.NilError(t, err)
-	defer rt.Close()
-	term, err := rt.NewTerminal(uint32(cols), uint32(rows), 2000)
+	term, err := libghostty.NewTerminal(
+		libghostty.WithSize(cols, rows),
+		libghostty.WithMaxScrollbackLines(2000),
+		libghostty.WithContinuationMaxBytes(continuationMaxBytes),
+	)
 	assert.NilError(t, err)
 	defer term.Close()
-	assert.NilError(t, term.Feed(input))
+	term.VTWrite(input)
 	snapshot, err := term.Snapshot()
 	assert.NilError(t, err)
 	return &sessionState{Cols: cols, Rows: rows, SavedAt: savedAt, Snapshot: snapshot}

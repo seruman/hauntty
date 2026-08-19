@@ -139,11 +139,11 @@ func TestDumpFormatMapping(t *testing.T) {
 	tests := []struct {
 		name  string
 		input protocol.DumpFormat
-		want  libghostty.DumpFormat
+		want  terminalFormat
 	}{
-		{"plain", protocol.DumpPlain, libghostty.DumpPlain},
-		{"vt", protocol.DumpVT, libghostty.DumpVTSafe},
-		{"html", protocol.DumpHTML, libghostty.DumpHTML},
+		{"plain", protocol.DumpPlain, terminalFormat{emit: libghostty.FormatterFormatPlain}},
+		{"vt", protocol.DumpVT, terminalFormat{emit: libghostty.FormatterFormatVT, safe: true}},
+		{"html", protocol.DumpHTML, terminalFormat{emit: libghostty.FormatterFormatHTML}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

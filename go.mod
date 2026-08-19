@@ -31,4 +31,4 @@ tool (
 	mvdan.cc/gofumpt
 )
 
-replace github.com/ncruces/wasm2go => github.com/seruman/wasm2go v0.0.0-20260816103921-6891aa6376a4
+replace github.com/ncruces/wasm2go => github.com/seruman/wasm2go v0.0.0-20260819030703-5ffe00aac316

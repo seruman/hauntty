@@ -31,7 +31,7 @@ func TestAttachStartsDaemonWhenNeeded(t *testing.T) {
 	sh.Type("echo daemon-started\n")
 	sh.WaitFor("daemon-started")
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 
@@ -57,7 +57,7 @@ func TestAttachInteractDetachList(t *testing.T) {
 	sh.Type("echo hello-from-hauntty\n")
 	sh.WaitFor("hello-from-hauntty")
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 
@@ -86,7 +86,7 @@ func TestReattachSessionContinuity(t *testing.T) {
 	sh.WaitFor("marker-one")
 	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 
@@ -95,7 +95,7 @@ func TestReattachSessionContinuity(t *testing.T) {
 	sh.WaitFor("marker-one")
 	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 }
@@ -120,14 +120,14 @@ func TestKeybindDetachWithMultipleClients(t *testing.T) {
 	sh2.WaitFor("attached to session")
 	e.waitAttachedPrompt(sh2)
 
-	sh1.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh1.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh1.WaitFor("detached")
 	e.waitHostPrompt(sh1)
 
 	sh2.Type("echo still-attached\n")
 	sh2.WaitFor("still-attached")
 
-	sh2.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh2.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh2.WaitFor("detached")
 	e.waitHostPrompt(sh2)
 }
@@ -146,7 +146,7 @@ func TestKillRunningSession(t *testing.T) {
 	sh.Type("$HT_BIN attach kill-me\n")
 	sh.WaitFor("created session")
 	e.waitAttachedPrompt(sh)
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 
 	kill := e.run("kill", "kill-me")
@@ -335,7 +335,7 @@ func TestKickClient(t *testing.T) {
 	sh2.Type("echo still-here\n")
 	sh2.WaitFor("still-here")
 
-	sh2.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh2.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh2.WaitFor("detached")
 	e.waitHostPrompt(sh2)
 }
@@ -377,7 +377,7 @@ func TestRestoreDeadSession(t *testing.T) {
 	sh.WaitFor("restore-marker")
 	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 
@@ -397,7 +397,7 @@ func TestRestoreDeadSession(t *testing.T) {
 	restoreSh.Type("echo restored-ok\n")
 	restoreSh.WaitFor("restored-ok")
 
-	restoreSh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	restoreSh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	restoreSh.WaitFor("detached")
 	e.waitHostPrompt(restoreSh)
 }
@@ -421,7 +421,7 @@ func TestRestoreDeadSessionAfterHostOutput(t *testing.T) {
 	sh.WaitFor("restore-marker")
 	sh.WaitStable(250*time.Millisecond, termtest.WaitTimeout(2*time.Second))
 
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 
@@ -443,7 +443,7 @@ func TestRestoreDeadSessionAfterHostOutput(t *testing.T) {
 	restoreSh.Type("echo restored-ok\n")
 	restoreSh.WaitFor("restored-ok")
 
-	restoreSh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	restoreSh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	restoreSh.WaitFor("detached")
 	e.waitHostPrompt(restoreSh)
 }

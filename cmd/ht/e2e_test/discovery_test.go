@@ -30,7 +30,7 @@ func TestListSessionsFiltering(t *testing.T) {
 	alive.Type("$HT_BIN attach alive\n")
 	alive.WaitFor("created session")
 	e.waitAttachedPrompt(alive)
-	alive.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	alive.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	alive.WaitFor("detached")
 
 	oneshootShell := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
@@ -131,7 +131,7 @@ func TestStatusSessionContext(t *testing.T) {
 	e.waitAttachedPrompt(sh)
 	sh.Type("$HT_BIN status\n")
 	sh.WaitFor("session:  status-session")
-	sh.Key(libghostty.KeyCode(']'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBracketRight, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 }
 

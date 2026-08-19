@@ -10,7 +10,6 @@ import (
 
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
-	"code.selman.me/hauntty/libghostty"
 	"github.com/creack/pty"
 	"gotest.tools/v3/assert"
 )
@@ -37,13 +36,7 @@ func (discardRW) Write(p []byte) (int, error) {
 
 func newSessionLoopHarness(t *testing.T) *Session {
 	ctx := t.Context()
-	rt, err := libghostty.NewRuntime()
-	assert.NilError(t, err)
-	t.Cleanup(func() {
-		assert.NilError(t, rt.Close())
-	})
-
-	term, err := newTerminalState(rt, 80, 24, 0)
+	term, err := newTerminalState(80, 24, 0)
 	assert.NilError(t, err)
 
 	ptmx, tty, err := pty.Open()
@@ -77,7 +70,7 @@ func newSessionLoopHarness(t *testing.T) *Session {
 		<-s.done
 		assert.NilError(t, ptmx.Close())
 		assert.NilError(t, tty.Close())
-		assert.NilError(t, term.close())
+		term.close()
 	})
 
 	return s
@@ -357,7 +350,7 @@ func TestSessionBackpressurePreservesClientAndOutput(t *testing.T) {
 		ClientID:   "1",
 		Cols:       80,
 		Rows:       24,
-		ScreenDump: []byte("\x1b[0m\x1b[1;1H"),
+		ScreenDump: []byte("\x1b[1;1H\x1b[0m"),
 		Created:    false,
 	})
 

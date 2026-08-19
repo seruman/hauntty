@@ -8,7 +8,7 @@ Wanted to understand PTY internals without leaving the comfort of Go, so I promp
 
 ## How it works
 
-A Go daemon manages sessions. Each session runs a shell in a PTY and tracks terminal state using [libghostty/ghostty-vt](https://github.com/ghostty-org/ghostty) compiled to WASM. When you reattach, it reconstructs the screen from that state.
+A Go daemon manages sessions. Each session runs a shell in a PTY and tracks terminal state using [libghostty-vt](https://github.com/ghostty-org/ghostty) compiled to WASM. The `code.selman.me/hauntty/libghostty` package follows the supported subset of [`go-libghostty`](https://github.com/mitchellh/go-libghostty)'s public interface without cgo. When you reattach, hauntty reconstructs the screen from that state.
 
 If Ghostty is installed, hauntty injects its shell integration scripts.
 

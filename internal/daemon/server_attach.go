@@ -27,7 +27,7 @@ func (s *Server) handleCreate(conn *protocol.Conn, msg *protocol.Create) {
 		return
 	}
 
-	sess, err := newSession(s.ctx, s.wasmRT, s.resizePolicy, sessionStartSpec{
+	sess, err := newSession(s.ctx, s.resizePolicy, sessionStartSpec{
 		name:       name,
 		command:    msg.Command,
 		env:        msg.Env,
@@ -83,7 +83,7 @@ func (s *Server) handleAttach(conn *protocol.Conn, closeConn func() error, msg *
 			return nil, nil, false, err
 		}
 
-		sess, err = newSession(s.ctx, s.wasmRT, s.resizePolicy, sessionStartSpec{
+		sess, err = newSession(s.ctx, s.resizePolicy, sessionStartSpec{
 			name:       name,
 			command:    msg.Command,
 			env:        msg.Env,
@@ -138,7 +138,7 @@ func (s *Server) handleAttachRestore(conn *protocol.Conn, closeConn func() error
 
 	size := termSize{cols: msg.Cols, rows: msg.Rows, xpixel: msg.Xpixel, ypixel: msg.Ypixel}
 
-	sess, err := restoreSession(s.ctx, s.wasmRT, state, s.resizePolicy, sessionStartSpec{
+	sess, err := restoreSession(s.ctx, state, s.resizePolicy, sessionStartSpec{
 		name:       name,
 		command:    msg.Command,
 		env:        msg.Env,

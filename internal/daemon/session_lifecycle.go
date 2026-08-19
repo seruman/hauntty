@@ -11,7 +11,6 @@ import (
 
 	"code.selman.me/hauntty/internal/config"
 	"code.selman.me/hauntty/internal/protocol"
-	"code.selman.me/hauntty/libghostty"
 	"github.com/creack/pty"
 )
 
@@ -70,8 +69,8 @@ func startSession(ctx context.Context, launch *sessionLaunch, term *terminalStat
 	return s
 }
 
-func newSession(ctx context.Context, wasmRT *libghostty.Runtime, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
-	term, err := newTerminalState(wasmRT, uint32(spec.size.cols), uint32(spec.size.rows), spec.scrollback)
+func newSession(ctx context.Context, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
+	term, err := newTerminalState(uint32(spec.size.cols), uint32(spec.size.rows), spec.scrollback)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +84,8 @@ func newSession(ctx context.Context, wasmRT *libghostty.Runtime, resizePolicy co
 	return startSession(ctx, launch, term, resizePolicy, spec), nil
 }
 
-func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sessionState, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
-	term, err := restoreTerminalState(wasmRT, state, spec.size, spec.scrollback)
+func restoreSession(ctx context.Context, state *sessionState, resizePolicy config.ResizePolicy, spec sessionStartSpec) (*Session, error) {
+	term, err := restoreTerminalState(state, spec.size, spec.scrollback)
 	if err != nil {
 		return nil, err
 	}
@@ -110,9 +109,7 @@ func restoreSession(ctx context.Context, wasmRT *libghostty.Runtime, state *sess
 func (s *Session) feedLoop(ctx context.Context) {
 	defer close(s.feedDone)
 	for item := range s.feedCh {
-		if err := s.term.feed(*item.data); err != nil {
-			slog.Debug("wasm feed error", "session", s.Name, "err", err)
-		}
+		s.term.feed(*item.data)
 		if item.applied != nil {
 			close(item.applied)
 		}
@@ -352,7 +349,7 @@ func (s *Session) run() {
 				// Attach dumps must reflect every PTY chunk we've already accepted.
 				waitFeedApplied(lastFeedApplied)
 
-				dump, err := s.term.dumpScreen(libghostty.DumpVTFull)
+				dump, err := s.term.dumpScreen(terminalFormatVTFull)
 				if err != nil {
 					a.result <- attachResp{err: err}
 					continue
@@ -512,7 +509,7 @@ func (s *Session) sendInput(data []byte) error {
 	return err
 }
 
-func (s *Session) dumpScreen(ctx context.Context, format libghostty.DumpFormat) (*libghostty.ScreenDump, error) {
+func (s *Session) dumpScreen(ctx context.Context, format terminalFormat) (*screenDump, error) {
 	return s.term.dumpScreen(format)
 }
 

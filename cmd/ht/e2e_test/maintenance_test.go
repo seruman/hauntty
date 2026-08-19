@@ -123,7 +123,7 @@ func TestDetachKeybind(t *testing.T) {
 	sh.Type("$HT_BIN attach keybind-session\n")
 	sh.WaitFor("created session")
 	e.waitAttachedPrompt(sh)
-	sh.Key(libghostty.KeyCode('\\'), libghostty.ModCtrl)
+	sh.Key(libghostty.KeyBackslash, libghostty.ModCtrl)
 	sh.WaitFor("detached")
 	e.waitHostPrompt(sh)
 }

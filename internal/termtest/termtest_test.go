@@ -12,7 +12,8 @@ import (
 )
 
 func TestTypeAndScreen(t *testing.T) {
-	tm := termtest.New(t, []string{"/bin/sh"},
+	tm := termtest.New(
+		t, []string{"/bin/sh"},
 		termtest.WithEnv("PS1=$ "),
 		termtest.WithTimeout(2*time.Second),
 	)
@@ -21,10 +22,19 @@ func TestTypeAndScreen(t *testing.T) {
 	tm.Type("echo hello\n")
 	tm.WaitFor("hello")
 
-	assert.Equal(t, tm.Screen(), "$ echo hello\nhello\n$")
-	assert.DeepEqual(t, tm.ScreenVT(), []byte("$ echo hello\r\nhello\r\n$ \x1b[0m\x1b[3;3H"))
-	assert.Equal(t, tm.PromptVisible(), true)
-	assert.Equal(t, tm.PromptVisibleMatch(func(line string) bool { return line == "$" || line == "$ " }), true)
+	screen := tm.Screen()
+	assert.Equal(t, screen, "$ echo hello\nhello\n$")
+
+	screenVT := tm.ScreenVT()
+	assert.DeepEqual(t, screenVT, []byte("$ echo hello\r\nhello\r\n$ \x1b[3;3H\x1b[0m"))
+
+	promptVisible := tm.PromptVisible()
+	assert.Equal(t, promptVisible, true)
+
+	promptMatches := tm.PromptVisibleMatch(func(line string) bool {
+		return line == "$" || line == "$ "
+	})
+	assert.Equal(t, promptMatches, true)
 }
 
 func TestKey(t *testing.T) {
@@ -39,7 +49,8 @@ func TestKey(t *testing.T) {
 }
 
 func TestResize(t *testing.T) {
-	tm := termtest.New(t, []string{"/bin/sh"},
+	tm := termtest.New(
+		t, []string{"/bin/sh"},
 		termtest.WithEnv("PS1=$ "),
 		termtest.WithSize(40, 10),
 	)
@@ -57,7 +68,8 @@ func TestSnapshot(t *testing.T) {
 	marker := dir + "/marker"
 	assert.NilError(t, os.WriteFile(marker, []byte("x"), 0o644))
 
-	tm := termtest.New(t, []string{"/bin/sh"},
+	tm := termtest.New(
+		t, []string{"/bin/sh"},
 		termtest.WithEnv("PS1=$ "),
 		termtest.WithDir(dir),
 		termtest.WithScrollback(200),
@@ -70,9 +82,9 @@ func TestSnapshot(t *testing.T) {
 	tm.Type("echo snap\n")
 	tm.WaitFor("snap")
 
-	got := tm.Snapshot(libghostty.DumpVTFull)
-	assert.DeepEqual(t, got, &libghostty.ScreenDump{
-		Data:        []byte("$ ls marker\r\nmarker\r\n$ echo snap\r\nsnap\r\n$ \x1b[0m\x1b[5;3H"),
+	got := tm.Snapshot(termtest.DumpVTFull)
+	assert.DeepEqual(t, got, &termtest.ScreenDump{
+		Data:        []byte("$ ls marker\r\nmarker\r\n$ echo snap\r\nsnap\r\n$ \x1b[5;3H\x1b[0m"),
 		CursorRow:   4,
 		CursorCol:   2,
 		IsAltScreen: false,
@@ -83,8 +95,8 @@ func TestWaitRowContains(t *testing.T) {
 	tm := termtest.New(t, []string{"/bin/sh"}, termtest.WithEnv("PS1=$ "))
 	tm.WaitFor("$")
 
-	dump := tm.Snapshot(libghostty.DumpPlain)
-	assert.DeepEqual(t, dump, &libghostty.ScreenDump{
+	dump := tm.Snapshot(termtest.DumpPlain)
+	assert.DeepEqual(t, dump, &termtest.ScreenDump{
 		Data:        []byte("$"),
 		CursorRow:   0,
 		CursorCol:   2,
@@ -93,9 +105,15 @@ func TestWaitRowContains(t *testing.T) {
 
 	row := int(dump.CursorRow)
 	tm.WaitRowContains(row, "$")
-	assert.Equal(t, tm.RowContains(row, "$"), true)
+
+	rowContains := tm.RowContains(row, "$")
+	assert.Equal(t, rowContains, true)
+
 	tm.WaitCursorRowContains("$")
-	assert.Equal(t, tm.CursorRowContains("$"), true)
+
+	cursorRowContains := tm.CursorRowContains("$")
+	assert.Equal(t, cursorRowContains, true)
+
 	tm.WaitPrompt()
 	tm.WaitPromptMatch(func(line string) bool { return line == "$" || line == "$ " })
 }
@@ -104,11 +122,14 @@ func TestWaitStable(t *testing.T) {
 	tm := termtest.New(t, []string{"/bin/sh"}, termtest.WithEnv("PS1=$ "))
 	tm.WaitFor("$")
 	tm.WaitStable(150 * time.Millisecond)
-	assert.Equal(t, tm.Screen(), "$")
+
+	screen := tm.Screen()
+	assert.Equal(t, screen, "$")
 }
 
 func TestDone(t *testing.T) {
 	tm := termtest.New(t, []string{"/bin/sh", "-c", "exit 0"})
+
 	select {
 	case <-tm.Done():
 	case <-time.After(5 * time.Second):

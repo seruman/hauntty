@@ -3,7 +3,7 @@ export GOEXPERIMENT := "simd"
 generate:
 	go generate ./...
 
-build: generate
+build:
 	go build -o ht ./cmd/ht
 
 test:

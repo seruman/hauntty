@@ -80,7 +80,7 @@ func (s *Server) dumpDeadSession(name string, format protocol.DumpFormat) ([]byt
 		return nil, false, nil
 	}
 
-	data, err := dumpDeadTerminalState(s.wasmRT, state, s.defaultScrollback, format)
+	data, err := dumpDeadTerminalState(state, s.defaultScrollback, format)
 	if err != nil {
 		return nil, false, err
 	}
