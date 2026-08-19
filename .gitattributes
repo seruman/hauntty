@@ -1,1 +1,2 @@
 libghostty/internal/wasmvt/vt.generated.go linguist-generated=true
+libghostty/internal/wasmvt/ghostty-vt-small.wasm -diff -merge -text linguist-vendored=true

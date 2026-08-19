@@ -8,7 +8,7 @@ import (
 	"code.selman.me/hauntty/libghostty/internal/wasmvt"
 )
 
-//go:generate sh -c "set -e; trap 'rm -f ghostty-vt-small.wasm' EXIT; curl -fsSL https://tip.files.ghostty.org/7f62fe70a288c5d35ebd3097e75c46017950bcc7/ghostty-vt-small.wasm -o ghostty-vt-small.wasm; echo '98ed3473d125460daea8602cebe2cd0e5a63209c908b72f054be712c2ccdcf6c  ghostty-vt-small.wasm' | shasum -a 256 -c -; go tool wasm2go -unsafe -nanbox -pkg wasmvt -o internal/wasmvt/vt.generated.go ghostty-vt-small.wasm"
+//go:generate sh -c "cd internal/wasmvt && shasum -a 256 -c ghostty-vt-small.wasm.sha256 && go tool wasm2go -unsafe -nanbox -pkg wasmvt -o vt.generated.go ghostty-vt-small.wasm"
 
 type wasmRuntime struct {
 	mu  sync.Mutex
