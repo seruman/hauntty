@@ -1,6 +1,6 @@
 module code.selman.me/hauntty
 
-go 1.27rc3
+go 1.27
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -31,4 +31,4 @@ tool (
 	mvdan.cc/gofumpt
 )
 
-replace github.com/ncruces/wasm2go => github.com/seruman/wasm2go v0.0.0-20260819030703-5ffe00aac316
+replace github.com/ncruces/wasm2go => github.com/seruman/wasm2go v0.0.0-20260820204434-52e0ccde57f4
