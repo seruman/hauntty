@@ -137,7 +137,7 @@ func TestKillRunningSession(t *testing.T) {
 	cfg.Client.DetachKeybind = "ctrl+]"
 	e := setup(t, cfg)
 
-	daemon := e.term([]string{htBin, "daemon", "--auto-exit"})
+	daemon := e.term([]string{htBin, "daemon"})
 	daemon.WaitFor("daemon listening")
 
 	sh := e.term([]string{"/bin/sh"}, termtest.WithEnv("PS1=$ ", "SHELL=/bin/sh"))
@@ -151,6 +151,12 @@ func TestKillRunningSession(t *testing.T) {
 
 	kill := e.run("kill", "kill-me")
 	kill.Assert(t, icmd.Expected{ExitCode: 0, Out: "killed session \"kill-me\"\n"})
+
+	select {
+	case <-daemon.Done():
+		t.Fatal("daemon exited after killing session")
+	default:
+	}
 
 	sh.Type("$HT_BIN attach kill-me\n")
 	sh.WaitFor("created session")

@@ -29,7 +29,6 @@ type testEnv struct {
 
 func TestMain(m *testing.M) {
 	dir := fs.NewDir(&testing.T{}, "ht-test")
-	defer dir.Remove()
 
 	htBin = dir.Join("ht")
 	result := icmd.RunCommand("go", "build", "-o", htBin, "code.selman.me/hauntty/cmd/ht")
@@ -37,7 +36,9 @@ func TestMain(m *testing.M) {
 		panic("build ht: " + result.Combined())
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+	dir.Remove()
+	os.Exit(code)
 }
 
 func setup(t *testing.T, cfg *config.Config) *testEnv {
@@ -45,7 +46,8 @@ func setup(t *testing.T, cfg *config.Config) *testEnv {
 		cfg = config.Default()
 	}
 
-	dir := fs.NewDir(t, "ht-e2e",
+	dir := fs.NewDir(
+		t, "ht-e2e",
 		fs.WithDir("config", fs.WithDir("hauntty")),
 		fs.WithDir("run"),
 		fs.WithDir("state"),
