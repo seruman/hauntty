@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -79,6 +80,7 @@ func TestHandleDumpReturnsDeadSession(t *testing.T) {
 	writeDeadSessionState(t, "dead", snapshotSessionState(t, 80, 24, time.Unix(1700000200, 0), []byte("hello\nworld\n")))
 
 	cfg := config.Default()
+	cfg.Daemon.SocketPath = filepath.Join(t.TempDir(), "hauntty.sock")
 	cfg.Daemon.StatePersistence = true
 	srv, err := New(t.Context(), &cfg.Daemon, cfg.Session.ResizePolicy)
 	assert.NilError(t, err)

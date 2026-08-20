@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"code.selman.me/hauntty/internal/config"
 	"gotest.tools/v3/assert"
 )
 
@@ -28,6 +30,28 @@ func TestReserveSessionNameIncludesDeadSessions(t *testing.T) {
 	name, err := srv.reserveSessionName("")
 	assert.NilError(t, err)
 	assert.Equal(t, name, "alpha-gamma")
+}
+
+func TestShutdownBeforeListenPreservesExistingSocket(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "ht-shutdown-")
+	assert.NilError(t, err)
+	t.Cleanup(func() { assert.NilError(t, os.RemoveAll(dir)) })
+
+	socketPath := filepath.Join(dir, "hauntty.sock")
+	listener, err := net.Listen("unix", socketPath)
+	assert.NilError(t, err)
+	t.Cleanup(func() { assert.NilError(t, listener.Close()) })
+
+	cfg := config.Default()
+	cfg.Daemon.SocketPath = socketPath
+	srv, err := New(t.Context(), &cfg.Daemon, cfg.Session.ResizePolicy)
+	assert.NilError(t, err)
+
+	srv.Shutdown()
+
+	conn, err := net.Dial("unix", socketPath)
+	assert.NilError(t, err)
+	assert.NilError(t, conn.Close())
 }
 
 func TestAcquireLockPreventsSecondDaemon(t *testing.T) {

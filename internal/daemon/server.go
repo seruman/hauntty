@@ -308,11 +308,13 @@ func (s *Server) shutdown() {
 	s.sessions = make(map[string]*Session)
 	s.mu.Unlock()
 
-	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		slog.Warn("remove socket", "path", s.socketPath, "err", err)
-	}
-	if err := os.Remove(s.pidPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		slog.Warn("remove pid file", "path", s.pidPath, "err", err)
+	if s.listener != nil {
+		if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("remove socket", "path", s.socketPath, "err", err)
+		}
+		if err := os.Remove(s.pidPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("remove pid file", "path", s.pidPath, "err", err)
+		}
 	}
 }
 
